@@ -1,0 +1,619 @@
+
+  :root {
+    --bg: #0f1115; --bg-card: #171a21; --border: #262b36;
+    --text: #e8eaed; --text-dim: #8b93a3; --bg-input: #0c0e12; --track: #2a2f3a;
+    --ok: #4caf50; --warn: #ffb300; --err: #ef5350; --info: #4a9eff;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f7f9; --bg-card: #ffffff; --border: #e1e4ea;
+      --text: #1b1e24; --text-dim: #5b6472; --bg-input: #ffffff; --track: #e1e4ea;
+      --ok: #2e7d32; --warn: #a15c00; --err: #c62828; --info: #1a63c9;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f7f9; --bg-card: #ffffff; --border: #e1e4ea;
+    --text: #1b1e24; --text-dim: #5b6472; --bg-input: #ffffff; --track: #e1e4ea;
+    --ok: #2e7d32; --warn: #a15c00; --err: #c62828; --info: #1a63c9;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1115; --bg-card: #171a21; --border: #262b36;
+    --text: #e8eaed; --text-dim: #8b93a3; --bg-input: #0c0e12; --track: #2a2f3a;
+    --ok: #4caf50; --warn: #ffb300; --err: #ef5350; --info: #4a9eff;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+  a { color: var(--info); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .topbar { display: flex; align-items: baseline; gap: 1.5rem; padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); }
+  .topbar h1 { font-size: 1.15rem; margin: 0; }
+  .nav { margin-left: auto; display: flex; gap: 1.25rem; font-size: 0.9rem; }
+  .nav a.active { color: var(--text); font-weight: 600; }
+  main { max-width: 60rem; margin: 0 auto; padding: 1.5rem; }
+  main.wide { max-width: 78rem; }
+  /* main.status-wide now scales with the actual browser window instead of
+     capping at a fixed rem width -- a direct follow-up: "if we don't have
+     enough room in the uploading tile, perhaps you can make the dashboard
+     use 95% of the browser width." */
+  main.status-wide { max-width: 95vw; }
+  /* align-items: stretch (grid's own default -- kept explicit here as a
+     reminder not to reintroduce "start") makes both cards in a row match
+     the taller one's height instead of each hugging its own content -- a
+     real report on the previous "start" behavior: "make sure the API
+     USAGE and UPLOADED TODAY tiles have the same height, i tend to make
+     the UPLOADED TODAY shorter to align" (working around it by hand,
+     every time, by resizing the browser). */
+  /* .status-columns (API usage/Uploaded today, Library/Total size, and
+     Statistics' "By extension" tables) is a plain, even 50/50 split --
+     deliberately NOT matched to .status-wide-row/.status-live's own
+     asymmetric split below. A scoped override was tried once (matching
+     #status-bottom's rows to the 4ch-nudged ratio, to align their right
+     edge with Status/Recent activity's narrow column above them) and was
+     wrong -- direct, emphatic correction: "you fucked up the tiles at
+     the bottom, that's the reason!!!!! they were 50-50 !!" The two rows
+     above (Activity+Status, Uploading+Recent activity) are asymmetric on
+     purpose ("Status -> much smaller"); #status-bottom's rows have no
+     such requirement and must stay even. Any resulting right-edge
+     mismatch between the narrow top column and the bottom tiles is an
+     accepted, structural consequence of two intentionally different
+     ratios existing on the same page -- not a bug to keep chasing by
+     forcing one to match the other. */
+  .status-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: stretch; }
+  @media (max-width: 680px) { .status-columns { grid-template-columns: 1fr; } }
+  /* status-wide-row (Activity+Status) and status-live (Uploading/Recent
+     activity) -- Activity and Uploading get the WIDE column, Status and
+     Recent activity the NARROW one, per the original, explicit spec:
+     "ACTIVITY should be on the left and STATUS -> much smaller - on the
+     right... align the sizes with UPLOADING==ACTIVITY and RECENT
+     ACTIVITY==STATUS." (A later attempt flattened this to an even 1fr/1fr
+     split, mistaking a complaint about dead space WITHIN the wide
+     Uploading box for a complaint about the width ratio itself -- it
+     wasn't; the dead space is a separate, internal concern of
+     #status-uploading's OWN two-sub-column split below, not this outer
+     row's ratio.) */
+  /* percentages (67.7%/32.3%) approximate the same 2.1fr/1fr ratio, but
+     as percent + calc() rather than fr + calc() -- mixing fr with other
+     units inside calc() isn't reliably supported, percent is. The
+     original ±4ch nudge was a direct, precise, small request: "make
+     RECENT ACTIVITY and STATUS a bit narrower to make their left
+     neighbouring tiles a bit wider.... not much, don't exagerate" -- "4
+     chars." ch is the width of the "0" character in the current font, so
+     this shifts the boundary by character-widths, not a broad ratio
+     change.
+     THE "- 1rem" IS LOAD-BEARING AND MUST NOT BE DROPPED -- it is what
+     accounts for this rule's own "gap: 1rem", and its absence was a
+     real, repeatedly-reported bug: "the overall width - on the right of
+     the upper right tiles, doesn't align with the tiles below it", then
+     again with the gap circled in a screenshot, "the width of the tiles
+     still still incorrect."
+     The mechanism: fr units are FLEXIBLE -- a browser sizing "1fr 1fr"
+     subtracts the gaps from the available space FIRST and divides only
+     what's left, so .status-columns (1fr 1fr) always fits its container
+     exactly. Explicit length tracks (percent, calc(), px) do NOT work
+     that way: each one takes its stated size and the gap is added ON TOP.
+     So tracks summing to exactly 100% plus a 1rem gap demand 100% + 1rem
+     and the whole grid overflows its container by one gap-width to the
+     right -- which is precisely how far these rows stuck out past
+     .status-footer and #status-bottom's rows, both of which are plain
+     100%-wide blocks. Subtracting the gap from one track makes the real
+     total (track + gap + track) come back to exactly 100%.
+     This also explains why TWO earlier attempts at this same report
+     failed: narrowing the ratio (±4ch -> ±8ch) could never help, since
+     the overflow came from the gap, not from the split between the two
+     columns; and forcing #status-bottom to match this ratio "fixed" the
+     symptom only by making the bottom row overflow identically, which
+     broke its own explicitly-required 50/50 split instead. */
+  .status-wide-row, .status-live { display: grid; grid-template-columns: calc(67.7% + 8ch - 1rem) calc(32.3% - 8ch); gap: 1rem; align-items: stretch; }
+  @media (max-width: 900px) { .status-wide-row, .status-live { grid-template-columns: 1fr; } }
+  /* body.status-page: Uploading/Recent activity is the ONE section that
+     grows to fill whatever room is left below everything else, per the
+     original, explicit request: "UPLOADING AND RECENT ACTIVITY should
+     take entire rest of height, they don't!" (A later attempt removed
+     this altogether after judging the empty-box-when-idle result ugly on
+     its own initiative, without checking back first -- that was the
+     wrong call; the actual standing instruction was to fill the height,
+     full stop.) min-height:100vh (not a hard height:100vh) means this
+     only EXPANDS content up to one viewport when there's room to spare;
+     if everything else ever legitimately needs more than one viewport,
+     body just grows past 100vh and the page scrolls normally rather than
+     clipping anything. */
+  body.status-page { display: flex; flex-direction: column; min-height: 100vh; }
+  body.status-page .topbar { flex: none; }
+  /* width:100% is load-bearing, not decorative -- main's own base rule
+     centers it with "margin: 0 auto", which relies on BLOCK layout's
+     width:auto meaning "fill the available width, then let max-width/
+     margin do the capping/centering." A flex item's width:auto does NOT
+     do that -- any auto margin in the cross axis suppresses flex's own
+     default stretch (that suppression is exactly what lets margin:auto
+     center a flex item at all), so without this, main shrinks to its
+     CONTENT's width instead of stretching up to max-width:95vw. Confirmed
+     the hard way once already -- don't drop this again either. */
+  body.status-page main { flex: 1 1 auto; width: 100%; display: flex; flex-direction: column; }
+  body.status-page #status-top,
+  body.status-page .status-footer,
+  body.status-page #status-bottom { flex: none; }
+  body.status-page .status-live { flex: 1 1 auto; min-height: 14rem; }
+  /* The grid's own items are the #status-uploading/#status-recent wrapper
+     divs (empty until refresh()'s innerHTML fills them) -- stretching
+     THEM (align-items:stretch above) is what gives .status-live-card
+     something concrete to fill with height:100% below; it can't reach
+     into their innerHTML'd children on its own. */
+  body.status-page .status-live > div { height: 100%; min-height: 0; }
+  .status-live-card { display: flex; flex-direction: column; }
+  body.status-page .status-live-card { height: 100%; }
+  .status-live-card h2 { flex: none; }
+  /* NO max-height here, deliberately. A "max-height: 34rem" once lived on
+     this rule, added as a ceiling for the capacity-measurement feedback
+     loop (measureUploadingCapacity/measureRecentCapacity read this
+     element's own clientHeight back to decide how many rows to render, so
+     an uncapped, content-driven height could spiral). It worked for that,
+     but it WAS the "not using the entire length" bug, and the arithmetic
+     is exact: 34rem = 544px, a .file-row is ~30px (0.85rem text + 0.3rem
+     margins), 544/30 = 18 rows -- precisely the 18 rows a screenshot
+     showed before the blank band, in a card the flex chain had stretched
+     well past 544px. The list was capped below its own card, so the
+     leftover was structurally unfillable no matter how much real content
+     existed: "you are still not using the entire tile on both tiles".
+     The runaway it was guarding against is now closed by two other
+     things that didn't exist when it was added -- the right Uploading
+     column is capped at uploadingCapacity (so rendered content can't be
+     unboundedly tall), and the JS clamps its own computed capacity
+     absolutely (see maxMeasuredCapacity) regardless of what any height
+     read returns. overflow-y:auto + min-height:0 stay as the safety
+     valve: the list shrinks and scrolls rather than pushing its card
+     taller. */
+  .live-list { overflow-y: auto; }
+  body.status-page .live-list { flex: 1 1 auto; min-height: 0; }
+  /* Uploading specifically: a real concurrency run can have a dozen-plus
+     files in flight at once, and each row already carries a progress bar,
+     byte counts, speed AND an ETA -- a real report, with a screenshot of
+     the list running past its box: "we need to adjust to have only the
+     correct amount of files. I would try to somehow squeeze two columns
+     of files in UPLOADING, perhaps we need a tighter format, per file, to
+     fit."
+     Two EXPLICIT sub-columns built in JS (refresh() splits s.in_flight in
+     half, first half in .upload-col #1, rest in #2 -- same top-to-bottom-
+     then-wrap order CSS column-count used to give for free), not CSS
+     multi-column -- column-count forces both columns to the SAME fixed
+     width regardless of content, and when one column's rows happen to be
+     shorter than the other's, that leaves a dead gap before the next
+     column starts: "on this image you can see there's too much
+     distance." max-width here is a CAP, not a fixed size -- each column
+     still only grows as wide as its own content actually needs (up to
+     that cap), so mismatched content no longer forces matching boxes.
+     white-space:nowrap+overflow:hidden is a direct follow-up, with its
+     own screenshot, on a row that WRAPPED instead of clipping -- a
+     two-line row broke CSS multi-column's own automatic balancing back
+     when that's what this used: "and wrapping is BAD!!" Kept here even
+     without multi-column, since a row can still be longer than its
+     column's own cap. */
+  /* live-list is a fixed CSS Grid split, still exact fr-based fractions
+     (no content-hugging/content-relative-cap behavior to drift again) --
+     3fr/2fr (60%/40%), per a direct instruction: "we can easily go with
+     left column 60% and the right 40%."
+     align-items: start (NOT grid's own default, stretch) was an early
+     attempted fix for the right column not using its full LENGTH --
+     kept, but confirmed (after a full round-trip through ghost/slot rows
+     that were tried and abandoned, see git history) to have NO actual
+     visual effect: a short box and a grid-stretched-tall box are pixel-
+     identical when both share the same plain background with no border,
+     and .live-list's own height is set by the tallest column's content
+     regardless of align-items on the items inside it. The real fix for
+     "right column looks emptier than left" is .live-list's own real
+     max-height cap (see its CSS comment above) plus capping BOTH columns
+     at the same measured capacity -- once neither column can render more
+     rows than fit, there's no structural asymmetry left to look wrong. */
+  #status-uploading .live-list { display: grid; grid-template-columns: 3fr 2fr; align-items: start; align-content: start; gap: 0.2rem 1.2rem; }
+  @media (max-width: 680px) { #status-uploading .live-list { grid-template-columns: 1fr; } }
+  /* min-width:0 on the grid item itself -- same reasoning as the flex
+     row's own min-width:0 below: a grid item's default min-width is
+     "auto" (respects content's intrinsic size), which would let a long
+     enough row still push its 1fr track wider than an even split. */
+  #status-uploading .upload-col { min-width: 0; overflow: hidden; }
+  /* Plain flex ROWS, not a CSS table -- a real, screenshotted rendering
+     bug: display:table-cell on a real <button> (the cancel X) does not
+     reliably participate in table layout across browsers -- form
+     controls have their own UA-level box handling that table's implicit
+     row/column grouping algorithm doesn't always respect, and the result
+     was rows visibly shifting cells between each other, an X floating on
+     its own line, X's appearing on the wrong (already-100%) rows: "look
+     how ugly it looks!!!!!!!" flex has none of that: every child,
+     <button> included, is a completely normal flex item. min-width:0 on
+     the LAST item (name+extra) is what keeps a long, nowrap filename
+     from expanding the row -- a flex item's default min-width is "auto"
+     (respects content's intrinsic size), which is the actual root cause
+     the earlier table attempt was also trying to work around; this is
+     the standard, well-supported way to do it instead. */
+  /* No font-family/font-size override here at all -- after going back
+     and forth (a sans-serif override, then a size bump to compensate for
+     it), a direct instruction settled it: "use it [.file-row's own
+     ui-monospace] for UPLOADING with the same font size as RECENT
+     ACTIVITY (0.85) -- but for the bar in UPLOADING, keep in sans-serif
+     since monospace is ugly." Uploading rows now inherit .file-row's
+     base rule completely unchanged (ui-monospace/Consolas/monospace,
+     0.85rem) -- identical to Recent activity, not just visually close.
+     "The bar" (the Activity card's own Transfer line, and .bar/.bar-fill
+     themselves, which carry no text at all) were never touched by this
+     rule either way and stay on the page's plain sans-serif default. */
+  /* margin/bar width both restored to what Recent activity's own row
+     spacing and the original (pre-condensing) Uploading bar used --
+     0.3rem margin, 9rem bar -- a direct report: "it feels very crampy"
+     once compared side by side against an older screenshot with looser
+     spacing. Same font, same size, just more room around it. */
+  #status-uploading .file-row { display: flex; align-items: center; gap: 0.3rem; margin: 0.3rem 0; white-space: nowrap; overflow: hidden; }
+  #status-uploading .file-row > span:last-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #status-uploading .bar { flex: none; width: 9rem; }
+  #status-uploading .cell-pct { flex: none; width: 2.3rem; text-align: right; font-variant-numeric: tabular-nums; }
+  /* file-row-x: the per-file cancel control, moved from a trailing "Skip"
+     button to a small X leading the row (left of the bar) -- a direct
+     follow-up: "I would actually use an X for the skip/cancel (at the
+     left of the download bar) so you can condense the side by side
+     downloads furthermore." file-row-x-spacer holds the same fixed width
+     for a file already at 100% (nothing left to cancel), so the bar
+     still starts at the same x-position on every row regardless. */
+  #status-uploading .file-row-x, #status-uploading .file-row-x-spacer { flex: none; width: 1.1rem; text-align: center; }
+  .file-row-x { cursor: pointer; background: transparent; border: none; padding: 0; margin: 0; color: var(--text-dim); font-size: 0.85rem; line-height: 1; border-radius: 3px; }
+  .file-row-x:hover { color: var(--err); }
+  .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.3rem; margin-bottom: 1rem; }
+  .card h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin: 0 0 0.8rem; }
+  .row { display: flex; justify-content: space-between; align-items: center; margin: 0.4rem 0; gap: 1rem; }
+  .row .label { color: var(--text-dim); }
+  /* A segment of a row's text that must not break inside, e.g. "47m 22s
+     elapsed" -- on a phone the row wraps between segments instead. */
+  .keep-together { white-space: nowrap; }
+  .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+  .badge-ok { background: rgba(76,175,80,0.15); color: var(--ok); }
+  .badge-warn { background: rgba(255,179,0,0.15); color: var(--warn); }
+  .badge-err { background: rgba(239,83,80,0.15); color: var(--err); }
+  .badge-dim { background: rgba(139,147,163,0.15); color: var(--text-dim); }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: 0.8rem; }
+  /* quota-card: API usage today / Uploaded today specifically -- a
+     direct report: "the rests at midnight should be align on both to the
+     bottom and the bar + API requests count should be at the same height
+     of requests." Uploaded today's stats-grid (big numbers) is naturally
+     taller than API usage today's single bar row, and .status-columns'
+     own align-items:stretch (elsewhere in this file) then stretches BOTH
+     card boxes to match that taller one -- but only Uploaded today's own
+     content actually grows to fill that height; API usage today's bar
+     row and "Resets..." hint stayed exactly where their own natural
+     content put them, well above the bottom of the now-taller stretched
+     box. flex:1 on the main content (the bar .row, or .stats-grid) makes
+     it consume the stretched card's full available height and CENTER
+     itself within that (align-items/align-content:center) -- putting the
+     bar at the same vertical position the stats occupy -- which, since
+     the main content now fills all the free space, is also what puts
+     "Resets..." at the very bottom on both cards, without needing a
+     separate margin-top:auto on the hint itself. */
+  .quota-card { display: flex; flex-direction: column; }
+  .quota-card .row { flex: 1; align-items: center; }
+  .quota-card .stats-grid { flex: 1; align-content: center; }
+  .stat { text-align: center; }
+  .stat .n { font-size: 1.6rem; font-weight: 700; }
+  .stat .l { color: var(--text-dim); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .file-row { margin: 0.3rem 0; font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; }
+  /* Recent activity rows carry only a badge + filename now, the full
+     error text having moved to a title="" hover tooltip (see refresh()'s
+     own comment) -- ellipsis rather than wrap keeps a long filename from
+     ever pushing the narrower Recent activity column wider than its grid
+     track. A DIFFERENT class from the plain .file-row Uploading uses --
+     that row still carries an interactive Skip button that must never be
+     clipped off by an overflow:hidden ancestor. */
+  .file-row-trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar { display: inline-block; width: 9rem; height: 0.55rem; background: var(--track); border-radius: 3px; overflow: hidden; vertical-align: middle; margin-right: 0.5rem; }
+  .bar-fill { display: block; height: 100%; background: var(--info); }
+  /* status-footer: a persistent one-line strip showing the most recent
+     event -- a direct request: "i want to have a tile / footer like at
+     the bottom that will have some informative data, perhaps the last
+     message". Previously this was just another row buried inside the
+     Status card; pulling it out here is also what actually shortens that
+     card (see the Activity/Status split above). Sits between the
+     Uploading/Recent row and the API usage/Library rows below it, per a
+     direct follow-up on the page's overall order. */
+  .status-footer { margin: 1rem 0; padding: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; font-size: 0.85rem; }
+  /* ONE tile holding two halves. There was a divider rule between them
+     for exactly one round -- "that | is ugly, let's remove it and just
+     make sure the text remains within the same alignment". Removed; the
+     grid stays, because the grid is what the alignment request is asking
+     for: two 1fr tracks pin the right half's label to the same x on
+     every poll, so it doesn't drift as the left half's message changes
+     length. A plain flexbox with space-between would have moved it on
+     every message.
+     min-width:0 on the cells is what makes that hold: a grid item's
+     automatic minimum size is its CONTENT's, so a single long error
+     message (this strip's whole job) would otherwise push its own track
+     past its half and shove the right half out of alignment. With
+     min-width:0 the track keeps its share and overflow-wrap breaks the
+     text instead.
+
+     THE PADDING LIVES ON THE CELLS, NOT ON THE TILE, and that is the
+     whole alignment fix -- a screenshot pair showed the left half
+     landing on the card below it while the right half sat ~21px to the
+     LEFT of the card below IT ("look how well the text aligns here...
+     and how bad it does here"). Both halves are supposed to line up
+     with .status-columns' two cards underneath, and the geometry only
+     works out if the footer reproduces those cards' own insets exactly:
+     match .status-columns' gap (1rem, NOT 1.1rem) so the midpoint lands
+     in the same place, and give each cell .card's own 1.3rem horizontal
+     padding so the text inside starts where the card's text does.
+     Padding on the TILE cannot do this: it insets the whole grid, which
+     shifts the right track's start LEFT of the card boundary below by
+     half the padding, while leaving that cell's text with no inset of
+     its own -- two errors compounding in the same direction, which is
+     why the right half was visibly worse off than the left.
+     The right cell carries one extra pixel because the card below it
+     starts with a 1px border INSIDE its grid track that this cell has
+     no equivalent for. Pedantic, but it is the difference between
+     "aligned" and "nearly aligned", which is exactly what was reported.
+     &nbsp; padding was the suggested fix and would have worked at one
+     window width only: every quantity here scales with the layout. */
+  .status-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+  .status-footer > div { min-width: 0; overflow-wrap: anywhere; padding: 0.7rem 1.3rem; }
+  .status-footer > div + div { padding-left: calc(1.3rem + 1px); }
+  @media (max-width: 680px) { .status-footer { grid-template-columns: 1fr; }
+    .status-footer > div { padding: 0.5rem 1.3rem; }
+    .status-footer > div:first-child { padding-top: 0.7rem; }
+    .status-footer > div:last-child { padding-bottom: 0.7rem; } }
+  form .field { margin-bottom: 1.1rem; }
+  form label { display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.3rem; }
+  .hint { color: var(--text-dim); font-size: 0.78rem; margin-top: 0.3rem; }
+  input, select, textarea { width: 100%; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 0.5rem 0.6rem; font-family: inherit; font-size: 0.9rem; }
+  textarea { font-family: ui-monospace, Consolas, monospace; resize: vertical; }
+  button { background: var(--info); color: #ffffff; border: none; border-radius: 6px; padding: 0.55rem 1.2rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+  button:hover { opacity: 0.9; }
+  button.btn-sm { width: auto; padding: 0.2rem 0.7rem; font-size: 0.8rem; background: transparent; border: 1px solid var(--border); color: var(--text); }
+  button.btn-sm:hover { border-color: var(--info); color: var(--info); opacity: 1; }
+  details.advanced { margin-bottom: 1rem; }
+  details.advanced > summary { cursor: pointer; color: var(--text-dim); font-size: 0.85rem; padding: 0.4rem 0; user-select: none; }
+  details.advanced > summary:hover { color: var(--text); }
+  code { font-family: ui-monospace, Consolas, monospace; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; padding: 0.1rem 0.35rem; font-size: 0.85em; }
+  .banner { padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
+  .banner-ok { background: rgba(76,175,80,0.12); color: var(--ok); border: 1px solid rgba(76,175,80,0.3); }
+  .banner-err { background: rgba(239,83,80,0.12); color: var(--err); border: 1px solid rgba(239,83,80,0.3); }
+  .login-wrap { max-width: 22rem; margin: 12vh auto 0; padding: 0 1.5rem; }
+  .login-wrap h1 { font-size: 1.3rem; margin: 0 0 1.4rem; text-align: center; }
+  .login-wrap .card { margin-bottom: 0; }
+  .login-wrap .remember { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.2rem; }
+  .login-wrap .remember input { width: auto; }
+  .login-wrap .remember label { margin: 0; color: var(--text); }
+  .login-wrap button { width: 100%; }
+  .browse-tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  .browse-tabs a { padding: 0.4rem 0.9rem; border-radius: 999px; font-size: 0.85rem; background: var(--bg-card); border: 1px solid var(--border); color: var(--text-dim); }
+  .browse-tabs a.active { color: var(--text); border-color: var(--info); }
+  .search-row { display: flex; gap: 0.6rem; margin-bottom: 1rem; }
+  .search-row input { flex: 1; }
+  .search-row button { flex: none; }
+  table.browse { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  table.browse th { text-align: left; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  table.browse th a { color: var(--text-dim); }
+  table.browse th a:hover { color: var(--text); text-decoration: none; }
+  table.browse th a.active { color: var(--info); }
+  table.browse td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; white-space: nowrap; }
+  table.browse td.size, table.browse td.center { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  table.browse td.center, table.browse th.center { text-align: center; }
+  .table-wrap { overflow-x: auto; }
+  .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; font-size: 0.85rem; color: var(--text-dim); }
+  .pager a { color: var(--info); }
+  .pager .disabled { color: var(--text-dim); opacity: 0.4; pointer-events: none; }
+  .dup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .dup-card { display: block; border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem; cursor: pointer; background: var(--bg-card); }
+  .dup-card:has(input:checked) { border-color: var(--info); box-shadow: 0 0 0 1px var(--info); }
+  .dup-card input[type="radio"] { margin-bottom: 0.5rem; }
+  .dup-thumb { display: block; width: 100%; height: 180px; object-fit: cover; border-radius: 6px; background: var(--bg-input); }
+  .dup-thumb-video { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  /* originals-preview: the review item's OWN photo, much larger than
+     .dup-thumb and never cropped (object-fit: contain, not cover) -- a
+     real, exact complaint with a side-by-side screenshot: "do you really
+     think i can judge based on this preview?" .dup-thumb's fixed 180px
+     crop was fine for "which file is this", useless for judging
+     sharpness/quality. Clicking it opens the untouched original in a new
+     tab (see .originals-preview-link / RawSrc). */
+  .originals-preview-link { display: block; cursor: zoom-in; }
+  .originals-preview { display: block; width: 100%; max-height: 70vh; object-fit: contain; border-radius: 6px; background: var(--bg-input); }
+  .dup-name { margin-top: 0.5rem; font-weight: 600; font-size: 0.85rem; word-break: break-all; }
+  .dup-dir { color: var(--text-dim); font-size: 0.78rem; word-break: break-all; }
+  /* ONE segmented bar per media type, laid out as a single grid for the
+     WHOLE card rather than a grid per row -- the bars of Photos/Videos/
+     Other have to start and end at the same x, and per-row grids size
+     their columns independently. Each category contributes two rows:
+
+         (empty)  | segment labels | total files
+         Photos   | ===91%===|=8%= | 286.2GB
+
+     Six cells emitted per category, auto-flowing into three columns.
+     See statKindRow's doc comment for the numbers themselves.
+
+     SIZES ARE CALIBRATED TO THE REST OF THE PAGE, not chosen freely --
+     two rounds went out of scale before this ("everything is too big and
+     not proportional"). The reference points already in sharedCSS:
+     .card h2 is 0.8rem, .hint and .stat .l are 0.78rem, .row .label is
+     body size, and .bar (Sync progress) is 0.55rem tall. So the
+     the bar is 1.8rem with a 0.9rem percentage, segment labels 0.95rem,
+     totals 1rem and the category name 1rem. The two label groups sit
+     ABOVE the bar's own percentage on purpose -- they carry the actual
+     figures, the percentage is the summary. That is deliberately a
+     step ABOVE the page's small-print scale -- this card is the one a
+     person actually reads at a glance -- but well below the 2.6rem slab
+     that read as "everything is too big and not proportional". 1.35rem
+     was then too small. If it needs moving again, move the bar height
+     and the percentage together; those two set the whole card's weight. */
+  .mt-grid { display: grid; grid-template-columns: max-content 1fr max-content; column-gap: 1rem; align-items: center; }
+  .mt-name { font-size: 1rem; font-weight: 600; }
+  .mt-tot { text-align: right; font-size: 1rem; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mt-tot-b { color: var(--text); font-weight: 600; }
+  /* The gap between categories hangs off the bar row, so the label row of
+     the next category is not pushed away from its own bar.
+     MARGIN, not padding: sharedCSS sets box-sizing: border-box on every
+     element, so padding-bottom on .mt-bar comes OUT of its height --
+     1.6rem height with 1.15rem padding left a 7px bar that sliced the
+     percentage text in half. Reported as "the bars are SOOOOO THIN" and
+     "it looks buggy", and it genuinely was a bug, not a size choice. */
+  .mt-name, .mt-bar, .mt-tot-b { margin-bottom: 0.95rem; }
+  .mt-grid > span:empty { padding: 0; }
+  /* .mt-labels and .mt-bar carry the SAME inline flex values -- that is
+     the only thing keeping each label above its own segment. */
+  .mt-labels { display: flex; gap: 2px; font-size: 0.95rem; color: var(--text-dim); font-variant-numeric: tabular-nums; margin-bottom: 0.1rem; }
+  .mt-labels > span { overflow: hidden; white-space: nowrap; text-align: center; background: none; padding: 0 0.15rem; }
+  .mt-bar { display: flex; gap: 2px; height: 1.8rem; border-radius: 6px; overflow: hidden; background: var(--bg-input); }
+  .mt-seg { display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: 700;
+            overflow: hidden; white-space: nowrap; }
+  /* min-width is the "or a minimum length equal to the width of the text"
+     rule: a category with a tiny pending share still has to show its own
+     "N files in X" label, so the segment stops shrinking once the label
+     would clip. It grows past its true percentage to do that, which is
+     the deliberate trade -- the percentage inside the bar keeps the real
+     figure honest. 23ch fits the longest realistic label ("5,617 files in
+     24.2GB", 21 chars) plus the cell padding. No flex-shrink override is
+     needed: flexbox freezes an item whose min-width is violated and
+     redistributes to the other segment, so the pair still sums to the
+     track rather than overflowing it. */
+  .mt-pending { min-width: 21ch; }
+  /* Dark text on the bright uploaded segment, normal page text on the
+     muted pending one -- the mixed-down background is too dark for the
+     first and too light for the second. */
+  .mt-bar .mt-done { color: #0b0f14; }
+  .mt-bar .mt-pending { color: var(--text); }
+  table.stats { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  table.stats th { text-align: left; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-dim); padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+  table.stats th.num, table.stats td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.stats td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  table.stats tr:last-child td { border-bottom: none; }
+  table.stats td.name { font-family: ui-monospace, Consolas, monospace; }
+  .mini-bar-track { display: inline-block; width: 6rem; height: 0.45rem; background: var(--bg-input); border-radius: 3px; overflow: hidden; vertical-align: middle; margin-right: 0.6rem; }
+  .mini-bar-fill { display: block; height: 100%; background: var(--info); }
+  .year-chart { display: flex; align-items: flex-end; gap: 0.35rem; height: 9.5rem; margin: 1.6rem 0 0.3rem; }
+  .year-bar { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; height: 100%; }
+  .year-bar-track { position: relative; width: 100%; flex: 1 1 auto; display: flex; align-items: flex-end; }
+  .year-bar-fill { width: 100%; background: var(--info); border-radius: 3px 3px 0 0; min-height: 2px; }
+  .year-bar-value { position: absolute; left: 50%; transform: translateX(-50%); font-size: 0.68rem; color: var(--text-dim); white-space: nowrap; }
+  .year-bar-label { flex: 0 0 auto; font-size: 0.68rem; color: var(--text-dim); margin-top: 0.3rem; white-space: nowrap; }
+  /* year-bar-fill-alt distinguishes the SIZE chart from the FILES chart
+     stacked directly above it -- same geometry, different question, so
+     the colour is what stops the two being read as one continued series. */
+  .year-bar-fill-alt { background: var(--ok); }
+  /* year-chart-dense: the daily view packs 30 bars into one row (~47px
+     each), where a size label like "101.6GB" overflows at the default
+     0.68rem and collides with its neighbour. Shrinking the label is what
+     lets every bar keep its number instead of dropping labels entirely
+     -- "can you put the numbers on top of the bars, just like on the
+     CAPTURE BY YEAR ?". The x-axis labels ("Sep 8") are short enough to
+     stay as they are. */
+  .year-chart-dense .year-bar-value { font-size: 0.58rem; }
+  /* chart-tabs: the daily/weekly/monthly selector. Plain links carrying a
+     query param, not JS state -- see the /statistics handler's own
+     comment for why. */
+  .chart-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.2rem; }
+  .chart-tabs a { font-size: 0.8rem; padding: 0.2rem 0.7rem; border-radius: 999px; border: 1px solid var(--border); color: var(--text-dim); text-decoration: none; }
+  .chart-tabs a:hover { color: var(--text); }
+  .chart-tabs a.active { background: var(--info); border-color: var(--info); color: #fff; }
+  .chart-caption { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-top: 1rem; }
+  /* PHONE LAYOUT. A direct request: "render the web interface correctly on
+     mobile ... the current version does open, but it doesn't fit correctly
+     to a phone" -- with one hard constraint: "as long as you don't ruin the
+     web-version". So every phone rule lives in this ONE block, after every
+     desktop rule, and nothing above it was edited. The only additions
+     outside the block are the two display:none defaults just below, for
+     phone-only elements that desktop must never show.
+     600px because a phone in portrait is 360-430 CSS px wide and a tablet
+     in portrait is 768+; the older 680/900px breakpoints above only stack
+     grids and are left exactly as they were.
+     Verified with cmd/dashboard-preview screenshots at 384px, plus before
+     and after desktop screenshots compared pixel for pixel. */
+  .mt-phone, .chart-tap { display: none; }
+  @media (max-width: 600px) {
+    /* Top bar: title on its own line, nav as a swipeable strip of pills.
+       The single non-wrapping nav row was what pushed every page wider
+       than the screen, dragging the cards off the right edge with it. */
+    .topbar { flex-wrap: wrap; align-items: center; gap: 0.35rem 1rem; padding: 0.7rem 0.75rem 0; }
+    .topbar h1 { font-size: 1.05rem; }
+    .nav { margin-left: 0; flex: 1 1 100%; gap: 0.25rem; overflow-x: auto; scrollbar-width: none; padding-bottom: 0.55rem; }
+    .nav::-webkit-scrollbar { display: none; }
+    .nav a { flex: none; padding: 0.5rem 0.85rem; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+    .nav a.active { background: var(--bg-card); border-color: var(--border); }
+    main, main.wide, main.status-wide { max-width: none; padding: 0.75rem; }
+    .card { padding: 0.9rem 0.95rem; }
+    .row { flex-wrap: wrap; gap: 0.2rem 0.75rem; }
+    .stat .n { font-size: 1.3rem; }
+    /* A grid of exactly three figures (Total size) fits three across at
+       this size; the default two-column fit left the third alone on its
+       own row. Four-figure grids stay two by two. */
+    .stats-grid:has(> .stat:nth-child(3):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    /* Touch targets: about 36-44px, where desktop controls are ~20px. */
+    button.btn-sm { min-height: 2.25rem; padding: 0.35rem 0.9rem; }
+    .browse-tabs a, .chart-tabs a { padding: 0.5rem 0.9rem; }
+
+    /* Status: stop stretching to fill the screen height. On a desktop
+       that fill is the requested behaviour; on a tall single-column phone
+       it produced two screen-high lists before anything else. The lists
+       get a ceiling instead, and the row-capacity measurement in the page
+       script settles on whatever fits inside it. */
+    body.status-page { display: block; min-height: 0; }
+    body.status-page main { display: block; }
+    body.status-page .status-live > div, body.status-page .status-live-card { height: auto; }
+    body.status-page .live-list { max-height: 22rem; }
+    /* A grid item's automatic minimum width is its CONTENT's width. Once
+       these rows collapse to one 1fr column, the long no-wrap filenames in
+       Uploading set that minimum and stretched the column past the right
+       edge of the screen. Desktop is unaffected: its explicit calc() tracks
+       already cap the columns. */
+    .status-wide-row > div, .status-live > div, #status-uploading .live-list > div { min-width: 0; }
+    /* Upload rows become two lines: name first, then skip / bar / percent,
+       with a thumb-sized skip button. */
+    #status-uploading .file-row { flex-wrap: wrap; white-space: normal; row-gap: 0.1rem; margin: 0.5rem 0; }
+    #status-uploading .file-row > span:last-child { order: -1; flex: 1 1 100%; white-space: nowrap; }
+    #status-uploading .bar { flex: 1 1 auto; width: auto; }
+    #status-uploading .file-row-x, #status-uploading .file-row-x-spacer { width: 2.25rem; height: 2.25rem; font-size: 1.05rem; }
+    #status-uploading .cell-pct { width: 2.8rem; }
+
+    /* Statistics: the desktop media-type grid needs ~45 characters of
+       labels side by side; the phone copy puts name and totals on one
+       line, the bar under them, and the figures as a legend below. Its
+       pending segment keeps only enough minimum width for the percentage,
+       so the bar stays proportional -- the label moved to the legend. */
+    .mt-grid { display: none; }
+    .mt-phone { display: block; }
+    .mtp-row { margin-bottom: 1rem; }
+    .mtp-row:last-child { margin-bottom: 0.2rem; }
+    .mtp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; }
+    .mtp-name { font-weight: 600; }
+    .mtp-tot { font-size: 0.85rem; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .mtp-tot b { color: var(--text); }
+    .mt-phone .mt-bar { height: 1.6rem; }
+    .mt-phone .mt-seg { font-size: 0.8rem; }
+    .mt-phone .mt-pending { min-width: 2.75rem; }
+    .mtp-legend { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.1rem 1rem; margin-top: 0.3rem; font-size: 0.78rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    /* Bar charts: 30 daily bars get ~10px each, so the number above every
+       bar collided with its neighbours. Numbers go; every fifth axis label
+       stays; tapping a bar shows its figures in the caption below. */
+    .year-chart { gap: 2px; height: 8rem; margin-top: 0.8rem; }
+    .year-bar-value { display: none; }
+    .year-bar-label { visibility: hidden; }
+    .year-chart .year-bar:nth-child(5n+1) .year-bar-label { visibility: visible; }
+    .year-bar.tapped .year-bar-fill { filter: brightness(1.4); }
+    .chart-tap { display: block; min-height: 1.2rem; margin: 0.35rem 0 0.1rem; font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+    .chart-tap:empty::before { content: "Tap a bar for exact figures"; color: var(--text-dim); }
+    table.stats { font-size: 0.8rem; }
+    table.stats th, table.stats td { padding: 0.4rem 0.35rem; }
+    .mini-bar-track { width: 3.5rem; margin-right: 0.3rem; }
+
+    /* Browse: each file becomes a small card instead of a table row that
+       scrolls sideways. The header stays, reflowed into sort pills, so
+       sorting still works without adding a control. */
+    table.browse, table.browse thead, table.browse tbody, table.browse tr, table.browse td { display: block; }
+    table.browse thead tr { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.3rem; }
+    table.browse th { border: 1px solid var(--border); border-radius: 999px; padding: 0.35rem 0.7rem; }
+    table.browse tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.1rem 0.75rem; padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+    table.browse td { border: 0; padding: 0; white-space: normal; overflow-wrap: anywhere; }
+    table.browse td.center { text-align: left; }
+    table.browse td.b-name { grid-column: 1 / -1; order: -2; font-weight: 600; }
+    table.browse td.b-path { grid-column: 1 / -1; order: -1; color: var(--text-dim); font-size: 0.78rem; }
+    table.browse td.b-err { grid-column: 1 / -1; color: var(--err); }
+    /* Settings: the OAuth client ID is 71 characters with no break
+       opportunities. On a phone the value takes its own line, drops
+       Google's constant .apps.googleusercontent.com tail (the full ID stays
+       in the tooltip), and may break anywhere rather than overflow. */
+    .cid { min-width: 0; font-family: ui-monospace, Consolas, monospace; font-size: 0.82rem; overflow-wrap: anywhere; }
+    .cid-suffix { display: none; }
+    table.browse td[data-label]::before { content: attr(data-label) " "; color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .pager { flex-wrap: wrap; gap: 0.5rem; }
+  }

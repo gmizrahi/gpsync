@@ -1,0 +1,33 @@
+gpsync — internal/systray
+=========================
+
+This package is a modified, Windows-only fork of:
+
+    github.com/getlantern/systray, version v1.2.2
+    Copyright 2014 Brave New Software Project, Inc.
+    Licensed under the Apache License, Version 2.0
+
+The full upstream license text is in this directory, in LICENSE.
+
+Statement of changes (Apache License 2.0, section 4b)
+-----------------------------------------------------
+
+Changes made to the upstream source in this fork:
+
+1. Removed every non-Windows backend. Upstream ships darwin (Objective-C),
+   linux (C/GTK) and their cgo bridges; this fork keeps only systray.go and
+   systray_windows.go, because gpsync-tray is built for Windows alone and the
+   project builds without cgo.
+
+2. Added double-click support. Upstream's wndProc handles WM_LBUTTONUP and
+   WM_RBUTTONUP by opening the menu and offers no application-level hook for
+   a double click. This fork handles WM_LBUTTONDBLCLK and adds
+   SetOnDoubleClick, which gpsync-tray uses to open its dashboard.
+
+3. Removed unused API surface and adjusted logging to suit a single embedding
+   application.
+
+Unmodified files retain their original copyright and license. This fork is
+distributed as part of gpsync under the terms of the Apache License 2.0 for
+this package's contents; gpsync as a whole is MIT licensed (see the LICENSE
+file at the repository root).

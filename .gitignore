@@ -1,0 +1,20 @@
+# Build output. Binaries are never committed -- bin/ is local development
+# output, dist/ is release artefacts.
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Local AI working notes — never published
+.ai/
+CLAUDE.md
+
+# Never commit credentials or local state, even if GPSYNC_STATE_DIR is
+# misconfigured to point at the working tree.
+.gpsync/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+client_secret*.json
+token.json

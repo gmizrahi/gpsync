@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent for gpsync on macOS.
+
+    cp packaging/com.github.gmizrahi.gpsync.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.github.gmizrahi.gpsync.plist
+
+  Adjust the gpsync path below if you installed it somewhere other than
+  /usr/local/bin (Homebrew on Apple silicon uses /opt/homebrew/bin).
+
+  macOS will ask for permission the first time gpsync reads a protected
+  folder such as Pictures; grant it under System Settings → Privacy &
+  Security → Files and Folders.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.github.gmizrahi.gpsync</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/gpsync</string>
+    <string>dashboard</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/gpsync.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/gpsync.err</string>
+</dict>
+</plist>

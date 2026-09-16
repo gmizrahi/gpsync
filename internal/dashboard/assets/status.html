@@ -1,0 +1,725 @@
+
+<div id="status-top">loading…</div>
+<div class="status-live">
+  <div id="status-uploading"></div>
+  <div id="status-recent"></div>
+</div>
+<div class="status-footer" id="status-footer">
+  <div id="status-lastmsg">—</div>
+  <div id="status-lastupload">—</div>
+</div>
+<div id="status-bottom"></div>
+<script>
+// fmt/fmtBytes/fmtDuration all coerce with "|| 0", not "?? 0" -- a real
+// report caught "NaN% NaN B/s" showing up while nothing had transferred
+// yet, because an upstream NaN (0/0, or a field missing at zero) survives
+// "?? 0" (which only replaces null/undefined) but "|| 0" also catches NaN,
+// which is exactly what's falsy about it.
+function fmt(n) { return (n || 0).toLocaleString(); }
+function fmtBytes(n) {
+  n = n || 0;
+  // TB added alongside the switch to KB/MB/GB/TB labels everywhere, so a
+  // library past 1024 GB reads "1.0 TB" here too, as it does in the CLI.
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+}
+// Hours are carried explicitly rather than rolled into minutes: this now
+// also renders "last successful upload ... ago", which after an overnight
+// throttle is routinely hours and can be days, and "3074m 12s" is not a
+// number anyone can read at a glance. Everything else already using this
+// (run elapsed, ETA, the backoff countdown) gets the same benefit -- a
+// four-hour ETA used to render as "241m 5s" too. No days unit: "Hh Mm Ss"
+// is the format that was asked for, and one unbroken hour count stays
+// directly comparable against the backoff ladder's own rungs.
+function fmtDuration(totalSeconds) {
+  totalSeconds = Math.max(0, Math.ceil(totalSeconds || 0));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const sec = totalSeconds % 60;
+  if (h > 0) return h + 'h ' + m + 'm ' + sec + 's';
+  return m > 0 ? (m + 'm ' + sec + 's') : (sec + 's');
+}
+// fmtStamp renders "September 9, 2026 14:03:21" from a Unix timestamp.
+// Formatted client-side, unlike LastCrashAt's server-rendered string,
+// because the same timestamp also feeds the "ago" counter beside it and
+// splitting one value across two representations invites them to
+// disagree. Same wall clock either way -- the tray and the browser are
+// the same machine.
+const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function fmtStamp(epochSeconds) {
+  const d = new Date(epochSeconds * 1000);
+  const p = (n) => (n < 10 ? '0' + n : '' + n);
+  return monthNames[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear() +
+    ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+// fileSpeedTrackers persists ACROSS refresh() calls (module-level, not
+// declared inside the function) -- each entry needs the previous poll's
+// byte count and timestamp to compute a delta, exactly like the CLI's own
+// fileTransfer struct in cmd/gpsync/dashboard.go, just keyed by path and
+// updated once per poll instead of once per byte-write event.
+let fileSpeedTrackers = {};
+// lastFooterMessage persists across refresh() calls for the same reason
+// fileSpeedTrackers does -- see the footer's own comment below for why
+// the Last message strip must never blank itself back to a dash.
+let lastFooterMessage = null;
+// doneAtTracker records the first poll (Date.now()) a path was observed
+// at 100% -- the API carries no completion timestamp of its own, so
+// "most recently done first" (a direct request: "a recent uploaded file
+// goes top of the list... the first uploaded is at the end") has to be
+// derived client-side, the same way fileSpeedTrackers derives speed.
+let doneAtTracker = {};
+// uploadingLeftCapacityFallback is used ONLY before any Uploading row has
+// ever been painted (the very first refresh() call). A fixed guess can't
+// adapt to the actual viewport/window size, whatever else is on the page
+// above it, or a browser zoom level -- see measureUploadingCapacity below
+// for what's actually used every call after the first.
+const uploadingLeftCapacityFallback = 16;
+// maxMeasuredCapacity is an absolute ceiling on anything the two measure
+// functions below can return, no matter what the DOM reports. They read
+// an element's own clientHeight to decide how many rows to render into
+// that same element next poll, which is a feedback loop by construction:
+// if a height read ever comes back larger than it should (a layout
+// mid-flight, a browser quirk, a future CSS change that lets content
+// push the box taller), a bigger capacity renders more rows, which can
+// make the box taller still, with nothing to stop it. That exact spiral
+// was reported once -- "the right column goes beyond the amount of lines
+// it should go and the tile is actually resizing now... something is off
+// with your math" -- and was first patched with a max-height on
+// .live-list, which turned out to cap the list BELOW its own card and
+// became the "not using the entire tile" bug instead (see that rule's
+// own comment). This clamp closes the same loop without constraining the
+// visible layout at all: 400 rows is far past anything a real viewport
+// can show, so it never binds in practice, but it makes runaway growth
+// arithmetically impossible.
+const maxMeasuredCapacity = 400;
+// capacityCeiling is the real bound: how many rows could fit in the whole
+// VIEWPORT. The viewport is the one dimension that rendering more rows
+// cannot change, so clamping to it closes the feedback loop
+// mathematically rather than by picking a number -- a list can never
+// legitimately need more rows than the entire screen could show, and if a
+// height read ever says otherwise, that read is wrong. maxMeasuredCapacity
+// stays as the fallback for when window.innerHeight can't be read.
+function capacityCeiling(rowHeight) {
+  const vh = (typeof window !== 'undefined' && window.innerHeight) || 0;
+  if (!(vh > 0) || !(rowHeight > 0)) return maxMeasuredCapacity;
+  return Math.max(1, Math.min(maxMeasuredCapacity, Math.floor(vh / rowHeight)));
+}
+// measureListCapacity reads the PREVIOUS poll's already-rendered DOM --
+// the real height a .live-list actually has to work with, divided by the
+// real distance between two of its rows -- rather than guessing a row
+// count that has no relationship to either. Measuring the PREVIOUS render
+// instead of the upcoming one avoids a second layout pass/flicker; if the
+// window was just resized, this lags by at most one 1.5s poll before
+// self-correcting.
+//
+// The row PITCH is measured directly (rows[1].offsetTop -
+// rows[0].offsetTop), never computed from one row's box model. An earlier
+// version used "offsetHeight + marginTop + marginBottom", which
+// overestimated every row by a full margin and so left roughly a fifth of
+// each list permanently blank -- a long-running, repeatedly-reported bug:
+// "still do not use the entire length of the tile for listing files".
+// .file-row carries "margin: 0.3rem 0" and the rows are ordinary stacked
+// siblings, so adjacent vertical margins COLLAPSE: the real gap between
+// two rows is one 4.8px margin, not two. Measured against a real
+// screenshot: true pitch ~20.8px vs ~25.6px computed, i.e. 23% too large,
+// which showed up as 22 rows rendered where ~27 fit. Measuring the actual
+// distance between two rendered rows is exact by construction -- it can't
+// be wrong about collapsing, grid gaps, borders or line-height, because
+// it never models them in the first place.
+function measureListCapacity(selector, fallback) {
+  const listEl = document.querySelector(selector);
+  if (!listEl) return fallback;
+  const rows = listEl.querySelectorAll('.file-row');
+  if (!rows.length) return fallback;
+  const rowH = rows[0].offsetHeight;
+  let pitch = 0;
+  if (rows.length >= 2) {
+    pitch = rows[1].offsetTop - rows[0].offsetTop;
+  }
+  // A stacked row's pitch can never be smaller than the row's own height.
+  // Anything smaller means rows[0] and rows[1] aren't vertically adjacent
+  // -- in Uploading they may be the last row of the left column and the
+  // FIRST row of the right one -- so fall back to the box model, this
+  // time adding only max(top, bottom) rather than their sum, since that
+  // is what actually survives margin collapsing.
+  if (!(pitch >= rowH)) {
+    const cs = getComputedStyle(rows[0]);
+    pitch = rowH + Math.max(parseFloat(cs.marginTop) || 0, parseFloat(cs.marginBottom) || 0);
+  }
+  // The space to fill is the list's own height ONLY when something outside
+  // the list decides that height -- on desktop the card is stretched to
+  // the viewport, so clientHeight is a fixed target. The phone layout
+  // instead lets the list size to its content under a max-height ceiling,
+  // and there clientHeight just measures what was rendered last poll: N
+  // rows measured, minus the trailing margin, yields N-1, and the list
+  // decayed by one row per poll until it sat at a single row (measured:
+  // Recent activity at 54px holding 2 rows, capacity 1). When a ceiling
+  // is set, that ceiling is the real space to fill. Desktop sets none, so
+  // it takes exactly the path it always did.
+  const ceiling = parseFloat(getComputedStyle(listEl).maxHeight);
+  const available = ceiling > 0 ? ceiling : listEl.clientHeight;
+  if (!(pitch > 0) || !(available > 0)) return fallback;
+  // N rows occupy N*pitch plus one trailing margin (the last row's own,
+  // with no sibling after it to collapse into), so subtract that before
+  // dividing -- otherwise this can claim one row more than really fits
+  // and put a scrollbar on a list that was supposed to end flush.
+  const trailing = Math.max(0, pitch - rowH);
+  return Math.min(capacityCeiling(pitch), Math.max(1, Math.floor((available - trailing) / pitch)));
+}
+function measureUploadingCapacity() {
+  return measureListCapacity('#status-uploading .live-list', uploadingLeftCapacityFallback);
+}
+// recentCapacityFallback/measureRecentCapacity mirror
+// measureUploadingCapacity exactly, for Recent activity -- a real,
+// diagnosed bug (not just a layout tweak): Recent activity's own supply
+// was capped server-side at fewer rows (maxRecentEvents) than a
+// flex-filled card can actually display, so even with real history the
+// card could never fill -- "still lots of rows are kept unused... same
+// for RECENT ACTIVITY!" The server-side cap was raised (see
+// maxRecentEvents's own doc comment in internal/watchctl/watchctl.go);
+// this is what actually decides how many of that history render at
+// once, adapting to the real available height same as Uploading does.
+const recentCapacityFallback = 12;
+function measureRecentCapacity() {
+  return measureListCapacity('#status-recent .live-list', recentCapacityFallback);
+}
+function esc(s) {
+  return (s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+// truncMid shortens a long filename in the MIDDLE, not the end -- a
+// direct request, with an example: "abracadabramuchasgracias.jpg ->
+// abraca...gracias.jpg". Keeps the extension (and whatever precedes it)
+// visible, which a plain trailing ellipsis would lose -- often the more
+// identifying part of a filename. Splits the extension off first (only
+// treated as one if short -- a long trailing ".something" is more likely
+// a name that happens to contain a dot than a real extension) so it's
+// never itself truncated away.
+function truncMid(name, maxLen) {
+  if (name.length <= maxLen) return name;
+  const dot = name.lastIndexOf('.');
+  const ext = (dot > 0 && name.length - dot <= 6) ? name.slice(dot) : '';
+  const base = ext ? name.slice(0, dot) : name;
+  const keep = maxLen - ext.length - 3; // 3 for '...'
+  if (keep < 2) return name.slice(0, Math.max(1, maxLen - 1)) + '…';
+  const head = Math.ceil(keep / 2);
+  const tail = Math.floor(keep / 2);
+  return base.slice(0, head) + '...' + base.slice(base.length - tail) + ext;
+}
+async function refresh() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+
+    // top -> #status-top (Activity+Status, at the head of the page) and
+    // bottom -> #status-bottom (API usage/Uploaded today, then Library/
+    // Total size, at the tail -- see its own build further down) are
+    // separate containers from status-uploading/status-recent/
+    // status-footer between them, each re-rendered independently so one
+    // section's reflow never touches another -- the original ask behind
+    // this split: "perhaps the status should be divided into 3 in which
+    // the upper part is static in size and two columns below refresh
+    // (UPLOADING & RECENT ACTIVITY)", since extended to cover the whole
+    // page's now-five-section order.
+    const top = [];
+
+    // Every row in every card here is ALWAYS rendered with real (possibly
+    // "—"/dash) content, never conditionally added/removed -- a real
+    // report: "the status tile being dynamic and resizing is very
+    // annoying" (rows appearing/disappearing as paused/active/folder/etc.
+    // state changed made the WHOLE page reflow on every 1.5s poll,
+    // including everything below this card). Fixed row count, adaptive
+    // content -- same reasoning as the merged Run row and Transfer below.
+    //
+    // Split into two cards -- Activity (what's happening right now,
+    // changes every poll) and Status (controls/health, changes rarely) --
+    // a direct report: "you packed in the STATUS tile too much data and
+    // functionality in a very odd order." Last message used to be a
+    // third row type crammed into this same card; it's now its own strip
+    // further down the page instead (see below), which is also the piece
+    // of this card a real report asked to see turned into "a tile /
+    // footer like at the bottom." Wrapped in one status-wide-row so
+    // Activity gets the SAME wide column Uploading uses below it, and
+    // Status the same narrow column Recent activity uses -- a direct
+    // follow-up: "i would align the sizes with UPLOADING==ACTIVITY and
+    // RECENT ACTIVITY==STATUS," and the two rows read as one aligned
+    // grid down the page rather than two unrelated splits. Activity
+    // comes FIRST (left) here, matching Uploading's own left position.
+    top.push('<div class="status-wide-row">');
+    top.push('<div class="card"><h2>Activity</h2>');
+    // Run: ONE row always, whatever the state -- content changes, never
+    // the row's presence, so this can never change the card's row count
+    // on its own. A real report, once scan and upload started running
+    // concurrently (RunFolderCycle): "in the state put: scanning,
+    // uploading x/y files... i honestly don't care about the scanning, i
+    // want to see uploads." Priority: real confirmed upload work
+    // (files_total > 0, which stays true through a throttle pause too --
+    // Transfer's own row already owns showing that countdown) beats a
+    // bare "still scanning, nothing confirmed pending yet" state, which
+    // beats the last completed/aborted run's outcome, which beats a plain
+    // dash.
+    //
+    // Folder is its OWN row again, not folded into this one -- a direct
+    // follow-up correction: cramming "Uploading N/M files • elapsed •
+    // [i/n] folder" onto one line read as packed/cluttered. Its own
+    // content still follows the same "whichever service is actually doing
+    // something right now" rule the original report asked for (scan and
+    // upload share the one folder for a normal cycle -- see
+    // RunFolderCycle's own doc comment), it just gets the vertical room
+    // Run does instead of fighting it for one line.
+    let runContent;
+    if (s.files_total) {
+      // Each segment stays whole; a phone wraps between them.
+      const runParts = [fmt(s.files_uploading || 0) + ' uploading', fmt(s.files_uploaded || 0) + ' uploaded', fmt(s.files_total) + ' total'];
+      if (s.run_elapsed_secs) runParts.push(fmtDuration(s.run_elapsed_secs) + ' elapsed');
+      runContent = runParts.map((part, i) => '<span class="keep-together">' + part + (i < runParts.length - 1 ? '  •' : '') + '</span>').join('  ');
+    } else if (s.scanning) {
+      runContent = 'Scanning';
+    } else if (s.last_end_reason && s.last_end_reason !== 'completed') {
+      runContent = '<span class="badge badge-warn">' + esc(s.last_end_reason) + '</span> ' + esc(s.last_end_detail) + (s.last_updated_at ? ' (' + esc(s.last_updated_at) + ')' : '');
+    } else {
+      runContent = '<span style="color:var(--text-dim)">—</span>';
+    }
+    top.push('<div class="row"><span class="label">Run</span><span>' + runContent + '</span></div>');
+
+    const folderCount = s.folder_total ? ('[' + s.folder_index + '/' + s.folder_total + '] ') : '';
+    const folderContent = s.current_folder ? (folderCount + esc(s.current_folder)) : '<span style="color:var(--text-dim)">—</span>';
+    top.push('<div class="row"><span class="label">Folder</span><span>' + folderContent + '</span></div>');
+
+    // Transfer: ONE row always FILLED, not just always reserved -- a
+    // direct follow-up report: "there is a gap that comes and go...
+    // i think we are either retrying or transfering, right? so that
+    // could probably resolve an empty gap". Retrying (paused) and
+    // actively transferring bytes are the two things this card ever has
+    // to say about progress, and outside a throttle pause they're
+    // mutually exclusive -- so rather than two separately-reserved rows
+    // where one is a visibility:hidden gap almost all the time, this is
+    // ONE row whose content switches between them, always real, never
+    // blank once a run is active.
+    let transferContent;
+    if (s.paused) {
+      // CLI parity (cmd/gpsync/dashboard.go's backoffLines): rung, that
+      // rung's own full duration, and which concurrency dispatch resumes
+      // at -- not just the countdown alone.
+      const rungWait = s.pause_rung_wait_secs ? (' (' + fmtDuration(s.pause_rung_wait_secs) + ')') : '';
+      const conc = s.pause_max_concurrency ? ('  •  concurrency resumes at ' + s.pause_concurrency + '/' + s.pause_max_concurrency) : '';
+      transferContent = 'retrying in ' + fmtDuration(s.pause_remaining_secs) + ' (rung ' + (s.pause_rung || 0) + '/' + (s.pause_total_rungs || 0) + rungWait + ')' + conc + ' <button class="btn-sm" id="retry-btn" onclick="retryNow()">Retry Now</button>';
+    } else if (s.bytes_total) {
+      // CLI parity (cmd/gpsync/dashboard.go's "Transferred: X / Y  Z%
+      // rate/s  ETA T"): a real report pointed at run_progress's
+      // file-count-only figures wanting "as close as possible to the
+      // cli". Gated on bytes_total alone, NOT run_active (a real
+      // follow-up report: "i lack the ETA and speed on the file
+      // uploads") -- run_active tracks ONE Uploader.Run() call via
+      // run_progress, but RunFolderCycle's concurrent loop now makes
+      // MANY of those per cycle (one per batch of newly-discovered
+      // pending work), with real gaps between them while it waits on
+      // the scan for more. run_active/run_progress genuinely goes
+      // false in each of those gaps (the previous Run() already called
+      // RunFinish), even though the cycle is still very much active --
+      // exactly like files_total/scanning above, bytes_total (from
+      // wc.setPendingTotals, refreshed every loop iteration, not reset
+      // between individual Run() calls) is the signal that actually
+      // spans the whole cycle.
+      const bytesDone = s.bytes_done || 0;
+      const pct = Math.min(100, Math.round(100 * bytesDone / s.bytes_total));
+      transferContent = fmtBytes(bytesDone) + ' / ' + fmtBytes(s.bytes_total) + '  ' + pct + '%';
+      // Rate over transfer time, not wall time: hour-long throttle pauses
+      // otherwise drag the ETA out to hundreds of hours.
+      const transferSecs = s.transfer_secs || s.run_elapsed_secs;
+      if (transferSecs > 0) {
+        const rate = bytesDone / transferSecs;
+        transferContent += '  <span class="keep-together">' + fmtBytes(rate) + '/s</span>';
+        if (rate > 0 && s.bytes_total > bytesDone) {
+          transferContent += '  <span class="keep-together">ETA ' + fmtDuration((s.bytes_total - bytesDone) / rate) + '</span>';
+        }
+      }
+    } else {
+      transferContent = '<span style="color:var(--text-dim)">—</span>';
+    }
+    top.push('<div class="row"><span class="label">Transfer</span><span>' + transferContent + '</span></div>');
+    top.push('</div>');
+
+    let watchBadge = s.watching ? '<span class="badge badge-ok">watching</span>' : '<span class="badge badge-dim">paused</span>';
+    if (s.paused) watchBadge += ' <span class="badge badge-warn">throttled</span>';
+    const toggleLabel = s.watching ? 'Pause' : 'Resume';
+    top.push('<div class="card"><h2>Status</h2>');
+    top.push('<div class="row"><span class="label">Watching</span><span>' + watchBadge + ' <button class="btn-sm" id="toggle-btn" onclick="toggleWatching()">' + toggleLabel + '</button></span></div>');
+
+    // Starts with Windows: reflects the REAL registry state (see
+    // autostart.go), not a stored preference -- can never drift from
+    // whether gpsync-tray will actually launch at next sign-in.
+    let autostartBadge = s.autostart_installed ? '<span class="badge badge-ok">enabled</span>' : '<span class="badge badge-dim">disabled</span>';
+    const autostartToggleLabel = s.autostart_installed ? 'Disable' : 'Enable';
+    top.push('<div class="row"><span class="label">Starts with Windows</span><span>' + autostartBadge + ' <button class="btn-sm" id="autostart-btn" onclick="toggleAutostart()">' + autostartToggleLabel + '</button></span></div>');
+
+    // Last crash: silent-death visibility -- ALWAYS rendered (same fixed-
+    // row-count discipline as every other row on this card), showing
+    // "none recorded" in the common case rather than hiding the row
+    // entirely.
+    let lastCrashValue = '<span class="badge badge-ok">none recorded</span>';
+    if (s.last_crash_at) {
+      lastCrashValue = '<span class="badge badge-err">' + esc(s.last_crash_at) + '</span> ' + esc(s.last_crash_context) + ': ' + esc(s.last_crash_message);
+    }
+    top.push('<div class="row"><span class="label">Last crash</span><span>' + lastCrashValue + '</span></div>');
+    top.push('</div>');
+    top.push('</div>'); // close status-wide-row (Activity + Status)
+    document.getElementById('status-top').innerHTML = top.join('\n');
+
+    // Footer: the throttle reason while paused, otherwise a one-line
+    // summary of the most recent file outcome -- moved out of the Status
+    // card into its own strip further down the page instead (see
+    // .status-footer), a direct request: "i want to have a tile / footer
+    // like at the bottom that will have some informative data, perhaps
+    // the last message we should put there." A manually skipped file gets
+    // its own neutral wording/color here too -- see the Recent activity
+    // badge below for the fuller fix. Always rendered (a neutral dash
+    // before anything has ever happened).
+    let lastMessage = null;
+    if (s.paused) {
+      lastMessage = { color: 'var(--warn)', text: esc(s.pause_reason) };
+    } else if (s.recent && s.recent.length) {
+      const rr = s.recent[0];
+      if (rr.cancelled) {
+        lastMessage = { color: 'var(--text-dim)', text: 'Skipped ' + esc(rr.name) + ' (by request)' };
+      } else if (rr.ok) {
+        lastMessage = { color: 'var(--ok)', text: 'Uploaded ' + esc(rr.name) + ' (' + fmtBytes(rr.size) + ')' };
+      } else {
+        lastMessage = { color: 'var(--err)', text: esc(rr.name) + ' — ' + esc(rr.error) };
+      }
+    }
+    // STICKY, and deliberately so -- a direct correction: "don't reset the
+    // last message to '---' when you retry uploads; Last message = last
+    // message". Pressing Retry Now clears the pause, and if no file has
+    // completed since (the common case: the retry is what's about to find
+    // out whether uploads work again) both branches above go empty and the
+    // strip used to blank itself the instant it was most worth reading --
+    // wiping the throttle reason that explained why the button was there.
+    // A message only ever gets REPLACED by a newer one, never by nothing.
+    if (lastMessage) lastFooterMessage = lastMessage;
+    const lm = lastFooterMessage || { color: 'var(--text-dim)', text: '—' };
+    document.getElementById('status-lastmsg').innerHTML = '<span class="label">Last message</span>&nbsp;&nbsp;<span style="color:' + lm.color + '">' + lm.text + '</span>';
+
+    // Right half of the same strip: when the pipeline last actually
+    // worked. Unlike Last message this is read from the ledger, so it is
+    // right immediately after a restart rather than blank until the first
+    // file of the new process finishes.
+    let lastUpload = '—';
+    if (s.last_upload_at) {
+      const agoSecs = (Date.now() / 1000) - s.last_upload_at;
+      lastUpload = '<span style="color:var(--ok)">' + esc(fmtStamp(s.last_upload_at)) + '</span>' +
+        '<span style="color:var(--text-dim)">&nbsp;&nbsp;·&nbsp;&nbsp;' + fmtDuration(agoSecs) + ' ago</span>';
+    }
+    document.getElementById('status-lastupload').innerHTML = '<span class="label">Last successful upload</span>&nbsp;&nbsp;' + lastUpload;
+
+    // Bottom section: API usage/Uploaded today, then Library/Total size
+    // last -- a direct follow-up on the page's overall order: "below -
+    // API USAGE + UPLOADED TODAY and lastly - LIBRARY + TOTAL SIZE."
+    // Rendered into its own container (like Activity+Status and
+    // Uploading/Recent above) so this section's own reflow never touches
+    // the others.
+    const bottom = [];
+    if (s.quota_daily_limit || s.uploaded_today) {
+      bottom.push('<div class="status-columns">');
+      if (s.quota_daily_limit) {
+        const pct = Math.min(100, Math.round(100 * s.quota_used / s.quota_daily_limit));
+        const barColor = pct >= 90 ? 'var(--err)' : (pct >= 50 ? 'var(--warn)' : 'var(--ok)');
+        bottom.push('<div class="card quota-card"><h2>API usage today</h2>');
+        bottom.push('<div class="row"><span class="bar"><span class="bar-fill" style="width:' + pct + '%;background:' + barColor + '"></span></span>' + fmt(s.quota_used) + ' / ' + fmt(s.quota_daily_limit) + ' requests (' + pct + '%)</div>');
+        bottom.push('<div class="hint">Resets at midnight Pacific Time.</div>');
+        bottom.push('</div>');
+      }
+      bottom.push('<div class="card quota-card"><h2>Uploaded today</h2><div class="stats-grid">');
+      bottom.push('<div class="stat"><div class="n" style="color:var(--ok)">' + fmt(s.uploaded_today || 0) + '</div><div class="l">Files</div></div>');
+      bottom.push('<div class="stat"><div class="n" style="color:var(--ok)">' + fmtBytes(s.uploaded_today_bytes || 0) + '</div><div class="l">Size</div></div>');
+      bottom.push('</div><div class="hint">Resets at midnight Pacific Time.</div></div>');
+      bottom.push('</div>');
+    }
+
+    // Library counts and total size are two separate tiles side by side,
+    // both in the same big-number stat format -- a real report: "the
+    // totals in the LIBRARY, use the same format and font, not a small
+    // text below these numbers - you have room... split to two tiles
+    // near each other".
+    bottom.push('<div class="status-columns">');
+    bottom.push('<div class="card"><h2>Library</h2><div class="stats-grid">');
+    bottom.push('<div class="stat"><div class="n" style="color:var(--ok)">' + fmt(s.synced) + '</div><div class="l">Synced</div></div>');
+    bottom.push('<div class="stat"><div class="n">' + fmt(s.pending) + '</div><div class="l">Pending</div></div>');
+    bottom.push('<div class="stat"><div class="n" style="color:var(--warn)">' + fmt(s.failed_retryable) + '</div><div class="l">Retryable</div></div>');
+    bottom.push('<div class="stat"><div class="n" style="color:var(--err)">' + fmt(s.failed_permanent) + '</div><div class="l">Failed</div></div>');
+    bottom.push('</div>');
+    if (s.missing_confirmed) {
+      bottom.push('<div class="hint">' + fmt(s.missing_confirmed) + ' file' + (s.missing_confirmed === 1 ? ' is' : 's are') +
+        ' no longer on disk. Run <code>gpsync recheck --missing</code> to forget ' + (s.missing_confirmed === 1 ? 'it' : 'them') + '.</div>');
+    }
+    bottom.push('</div>');
+    // Retryable files are still to upload: count them as pending here.
+    const outstandingBytes = (s.pending_bytes || 0) + (s.retryable_bytes || 0);
+    const totalLibraryBytes = (s.synced_bytes || 0) + outstandingBytes;
+    bottom.push('<div class="card"><h2>Total Size</h2><div class="stats-grid">');
+    bottom.push('<div class="stat"><div class="n">' + fmtBytes(totalLibraryBytes) + '</div><div class="l">Total</div></div>');
+    bottom.push('<div class="stat"><div class="n" style="color:var(--ok)">' + fmtBytes(s.synced_bytes) + '</div><div class="l">Synced</div></div>');
+    bottom.push('<div class="stat"><div class="n">' + fmtBytes(outstandingBytes) + '</div><div class="l">Pending</div></div>');
+    bottom.push('</div></div>');
+    bottom.push('</div>');
+    document.getElementById('status-bottom').innerHTML = bottom.join('\n');
+
+    // Left column: files actively uploading right now, now with a
+    // per-file speed and ETA -- a direct request: "i wish to see speed and
+    // ETA for each file as we have in the cmdline." The CLI's own
+    // (cmd/gpsync/dashboard.go's fileTransfer) tracks this from individual
+    // byte-write events fired many times/sec inside the same process; this
+    // page only gets a snapshot of "sent" once per 1.5s poll, so
+    // fileSpeedTrackers (declared once, module-level, below) does the same
+    // exponentially-smoothed delta-over-time calculation across successive
+    // polls instead -- coarser, but needs no new server-side plumbing.
+    const uploading = ['<div class="card status-live-card"><h2>Uploading</h2><div class="live-list">'];
+    if (s.in_flight && s.in_flight.length) {
+      const seenPaths = new Set();
+      const now0 = Date.now();
+      // Active files (still sending) always come first, in whatever order
+      // the server gives them; done files (100%, waiting on the batch to
+      // flush) follow, most-recently-finished first -- a direct request:
+      // "we should always show the files being uploaded at the top of the
+      // left column and start accumulating below those being uploaded,
+      // the files that we already did pushing them down... a recent
+      // uploaded file goes top of the list... the first uploaded is at
+      // the end." doneAtTracker (module-level, like fileSpeedTrackers)
+      // records the FIRST poll a path was seen at 100%, since the API
+      // itself carries no completion timestamp -- everything needed for
+      // "most recent first" has to be derived client-side, the same
+      // reasoning fileSpeedTrackers already uses for per-file speed.
+      const active = [], done = [];
+      for (const f of s.in_flight) {
+        seenPaths.add(f.path);
+        if (f.percent >= 100) {
+          if (!(f.path in doneAtTracker)) doneAtTracker[f.path] = now0;
+          done.push(f);
+        } else {
+          active.push(f);
+        }
+      }
+      done.sort((a, b) => doneAtTracker[b.path] - doneAtTracker[a.path]);
+      const ordered = active.concat(done);
+
+      const rows = [];
+      for (const f of ordered) {
+        const now = Date.now();
+        let tr = fileSpeedTrackers[f.path];
+        if (!tr || f.sent < tr.lastSent) {
+          // New file, or its counter went backward (a retry restarting
+          // the same path from byte 0) -- same "treat as fresh" rule the
+          // CLI's own onBytes uses, so a retry doesn't show a huge
+          // negative instantaneous rate.
+          tr = { lastSent: f.sent, lastTime: now, speed: 0 };
+          fileSpeedTrackers[f.path] = tr;
+        } else {
+          const dt = (now - tr.lastTime) / 1000;
+          if (dt > 0.3) {
+            const inst = (f.sent - tr.lastSent) / dt;
+            tr.speed = tr.speed === 0 ? inst : (0.6 * tr.speed + 0.4 * inst);
+            tr.lastSent = f.sent;
+            tr.lastTime = now;
+          }
+        }
+        // A file sitting at 100% (sent, waiting on the batch to flush)
+        // has nothing left to say about speed/ETA -- those two drop once
+        // done -- but the file's own SIZE still matters and stays, just
+        // as one number instead of a sent/total fraction (sent==total by
+        // then, so the fraction is redundant): a direct correction after
+        // an earlier pass dropped it entirely: "don't omit the file size,
+        // when the upload is completed!" The Skip button (there's
+        // nothing left TO skip) still becomes a fixed-width space
+        // instead, so every row's trailing content still lines up. What's
+        // shown is kept deliberately short otherwise (no "ETA" word, "/"
+        // not " / ") -- the dense two-column Uploading layout has real
+        // width pressure, and white-space:nowrap now clips anything that
+        // still doesn't fit rather than wrapping (see #status-uploading
+        // .file-row's own comment), so a shorter string is a real, not
+        // cosmetic, win.
+        const done = f.percent >= 100;
+        let extra;
+        if (done) {
+          extra = ' ' + fmtBytes(f.total);
+        } else {
+          extra = ' ' + fmtBytes(f.sent) + '/' + fmtBytes(f.total);
+          if (tr.speed > 0) {
+            extra += ' · ' + fmtBytes(tr.speed) + '/s';
+            if (f.total > f.sent) extra += ' · ' + fmtDuration((f.total - f.sent) / tr.speed);
+          }
+        }
+        // The cancel control moved from a "Skip" button trailing the row
+        // to a small X leading it, left of the bar -- a direct
+        // follow-up: "I would actually use an X for the skip/cancel (at
+        // the left of the download bar) so you can condense the side by
+        // side downloads furthermore." Same click target either way
+        // (skipFile(this), reading data-path off the button itself).
+        const cancelBtn = done
+          ? '<span class="file-row-x-spacer"></span>'
+          : '<button class="file-row-x" data-path="' + esc(f.path) + '" onclick="skipFile(this)" title="Skip this file">✕</button>';
+        // Long filenames get truncated in the MIDDLE (truncMid), not the
+        // end -- a direct request, with an example: "abracadabramuchas
+        // gracias.jpg -> abraca...gracias.jpg". Keeps both the start AND
+        // the extension/tail visible, which a plain trailing ellipsis
+        // would lose. Full name still in title="" for a hover, same as a
+        // failed Recent activity row's error text.
+        // Four cells (X/spacer, bar, percent, name+extra), each a direct
+        // child of .file-row -- #status-uploading's own CSS makes every
+        // direct child a flex item with a fixed width, which is what
+        // actually keeps the tile's width stable and every row's columns
+        // aligned (see that rule's own comment).
+        rows.push('<div class="file-row" title="' + esc(f.name) + '">' + cancelBtn + '<span class="bar"><span class="bar-fill" style="width:' + f.percent + '%"></span></span><span class="cell-pct">' + f.percent + '%</span><span>' + esc(truncMid(f.name, 26)) + extra + '</span></div>');
+      }
+      for (const p in fileSpeedTrackers) {
+        if (!seenPaths.has(p)) delete fileSpeedTrackers[p];
+      }
+      for (const p in doneAtTracker) {
+        if (!seenPaths.has(p)) delete doneAtTracker[p];
+      }
+      // Left column holds active files plus as many recently-done ones as
+      // MEASURED capacity allows; only once that's genuinely full does
+      // anything spill into the right column -- the original, explicit
+      // design: "we should always show the files being uploaded at the
+      // top of the left column and start accumulating below those being
+      // uploaded... when we reach the max amount of files we can show on
+      // that left column we start pushing files to the right one."
+      // ordered is already active-first then most-recent-done-first, so
+      // a plain slice at the capacity boundary is exactly that push-down
+      // behavior. (Capping this at half of rows.length was tried and was
+      // wrong -- it made the left column stop accepting files before it
+      // was actually full just to hand the right column a "fair share":
+      // "the left doesn't get fill dude, and already files start
+      // overfllowing to the right column." The real fix for the right
+      // column looking sparse isn't touching this split at all -- see
+      // the card-height discussion this led to.)
+      //
+      // The right column is ALSO capped at uploadingCapacity now (it
+      // used to take every remaining row, unbounded) -- a real report,
+      // with screenshots, caught the unbounded version growing the whole
+      // tile without limit once concurrency got high (dozens of in-flight
+      // files): "the right column goes beyond the amount of lines it
+      // should go and the tile is actually resizing now." Anything past
+      // 2x capacity simply isn't rendered, same as Recent activity
+      // already drops history past its own measured capacity -- .live-
+      // list's real max-height (see its own CSS comment) means this was
+      // never actually a full accounting of "everything in flight" to
+      // begin with, just what fits.
+      const uploadingCapacity = measureUploadingCapacity();
+      const leftRows = rows.slice(0, uploadingCapacity);
+      const rightRows = rows.slice(uploadingCapacity, uploadingCapacity * 2);
+      uploading.push('<div class="upload-col">' + leftRows.join('') + '</div>');
+      uploading.push('<div class="upload-col">' + rightRows.join('') + '</div>');
+    } else {
+      uploading.push('<div class="hint">Nothing uploading right now.</div>');
+      fileSpeedTrackers = {};
+      doneAtTracker = {};
+    }
+    uploading.push('</div></div>');
+    document.getElementById('status-uploading').innerHTML = uploading.join('\n');
+
+    // Right column: what just happened. A manually skipped file gets a
+    // neutral SKIPPED badge, not FAIL -- a real report: "i also notice
+    // that you marked a file i asked to skip as FAIL in the RECENT
+    // ACTIVITY - fix it." Beyond that, the badge now reflects WHY a file
+    // failed (error_kind, backed by retryx.Kind -- the real classification
+    // that decided this file's own retry behavior, not a guess from the
+    // message text) instead of one flat FAIL for everything -- a direct
+    // request: "i would change that chip to more informative; for
+    // example: 'THROTTLED', 'SKIPPED'". The full error text moves into a
+    // native title="" tooltip (hover to read it) rather than always being
+    // printed inline, so a long message can't blow out the row's width --
+    // "we don't need the entire error message; we can do a hover".
+    const failureBadge = {
+      permanent:   { cls: 'badge-err',  mark: 'FAILED' },
+      daily_quota: { cls: 'badge-warn', mark: 'QUOTA' },
+      throttle:    { cls: 'badge-warn', mark: 'THROTTLED' },
+      transient:   { cls: 'badge-warn', mark: 'RETRYING' },
+    };
+    const recent = ['<div class="card status-live-card"><h2>Recent activity</h2><div class="live-list">'];
+    const recentCapacity = measureRecentCapacity();
+    if (s.recent && s.recent.length) {
+      for (const e of s.recent.slice(0, recentCapacity)) {
+        // MANUAL-SKIP, not SKIPPED, and no trailing "— skipped by
+        // request" -- a direct correction: "this should show <MANUAL-
+        // SKIP> <filename> ;;; the first is a chip, and then no text,
+        // the chip is self-explanatory." Matches the other badges'
+        // own convention (THROTTLED/QUOTA/etc. carry no explanatory
+        // text either) rather than being the one exception.
+        let cls = 'badge-ok', mark = 'OK', detail = ' (' + fmtBytes(e.size) + ')', title = '';
+        if (e.cancelled) {
+          cls = 'badge-dim'; mark = 'MANUAL-SKIP'; detail = '';
+        } else if (!e.ok) {
+          const b = failureBadge[e.error_kind] || { cls: 'badge-err', mark: 'FAILED' };
+          cls = b.cls; mark = b.mark; detail = ''; title = e.error || '';
+        }
+        const titleAttr = title ? ' title="' + esc(title) + '"' : '';
+        recent.push('<div class="file-row file-row-trunc"' + titleAttr + '><span class="badge ' + cls + '">' + mark + '</span> ' + esc(e.name) + detail + '</div>');
+      }
+    } else {
+      recent.push('<div class="hint">Nothing yet.</div>');
+    }
+    recent.push('</div></div>');
+    document.getElementById('status-recent').innerHTML = recent.join('\n');
+  } catch (e) {
+    document.getElementById('status-top').innerHTML = '<div class="card"><span class="badge badge-err">dashboard server unreachable</span></div>';
+  }
+}
+async function toggleWatching() {
+  const btn = document.getElementById('toggle-btn');
+  if (btn) { btn.disabled = true; }
+  try {
+    await fetch('/api/toggle', { method: 'POST' });
+  } catch (e) {
+    // refresh() below will report "unreachable" if this really failed
+  }
+  await refresh();
+}
+async function toggleAutostart() {
+  const btn = document.getElementById('autostart-btn');
+  if (btn) { btn.disabled = true; }
+  try {
+    await fetch('/api/autostart-toggle', { method: 'POST' });
+  } catch (e) {
+    // refresh() below will report "unreachable" if this really failed
+  }
+  await refresh();
+}
+async function retryNow() {
+  const btn = document.getElementById('retry-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Retrying…'; }
+  try {
+    await fetch('/api/retry-now', { method: 'POST' });
+  } catch (e) {
+    // refresh() below will report "unreachable" if this really failed
+  }
+  await refresh();
+}
+async function skipFile(btn) {
+  btn.disabled = true;
+  // '…' not 'Skipping…' -- this button is now the small, fixed-width X
+  // leading a file-row (see .file-row-x), not the wide trailing "Skip"
+  // button it replaced; a long word here would force the row wider right
+  // when the whole point was to condense it.
+  btn.textContent = '…';
+  try {
+    await fetch('/api/skip-file', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'path=' + encodeURIComponent(btn.dataset.path) });
+  } catch (e) {
+    // refresh() below will report "unreachable" if this really failed
+  }
+  await refresh();
+}
+refresh();
+// 1s, per a direct request ("is there a way to make it refresh a bit
+// faster... like, every 1 sec ?"). Worth knowing what this costs: each
+// poll runs /api/status, which reads the ledger (LedgerSummary
+// aggregates over the whole uploads table), and statedb caps the pool at
+// ONE connection -- so these polls share a single connection with the
+// uploader's own writes. The live figures the eye actually tracks
+// (per-file bars, speed, ETA) come from watchctl's in-memory state and
+// cost nothing; it's the ledger half that does. If this ever shows up as
+// upload contention, the fix is to split the cadence (poll the in-memory
+// live state fast, the ledger-derived cards slowly) rather than to walk
+// this number back.
+setInterval(refresh, 1000);
+</script>

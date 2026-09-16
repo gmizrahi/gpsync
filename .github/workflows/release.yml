@@ -1,0 +1,125 @@
+name: Release
+
+# Tag a release to publish it:
+#
+#   git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+#
+# Produces tarballs for Linux and macOS, a zip and an installer for Windows,
+# and a checksums file covering all of them. The release is left as a DRAFT so
+# the notes can be reviewed before anyone can download it.
+on:
+  push:
+    tags: ["v*"]
+  # Lets the whole pipeline be exercised without publishing anything.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything except the Windows installer. gpsync has no cgo, so the Windows
+  # binaries cross-compile here too and the installer job only has to package
+  # them.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # `git describe` needs tags for the version stamp
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+
+      # GITHUB_REF_NAME is the TAG only for a tag push; on workflow_dispatch
+      # it is the branch name. `numeric` drops any pre-release suffix because
+      # Inno Setup's VersionInfoVersion must be numeric.
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev"; fi
+          n=$(printf '%s' "$v" | sed -E 's/[^0-9.].*$//; s/\.$//; s/^$/0.0.0/')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "numeric=$n" >> "$GITHUB_OUTPUT"
+
+      - run: make dist-all VERSION=${{ steps.version.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  # Inno Setup ships on GitHub's Windows images, so this only needs the
+  # already-built binaries.
+  installer:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev"; fi
+          n=$(printf '%s' "$v" | sed -E 's/[^0-9.].*$//; s/\.$//; s/^$/0.0.0/')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "numeric=$n" >> "$GITHUB_OUTPUT"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $n = "${{ steps.version.outputs.numeric }}"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=$v" `
+            "/DNumericVersion=$n" `
+            "/O.\dist" `
+            ".\packaging\gpsync.iss"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: dist/gpsync-setup-*.exe
+          retention-days: 7
+
+  release:
+    needs: [build, installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # creating the release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: dist
+
+      # The build job wrote checksums for the archives; the installer did not
+      # exist yet at that point, so regenerate over everything published.
+      - name: Checksums
+        working-directory: dist
+        run: |
+          rm -f checksums.txt
+          sha256sum gpsync-* > checksums.txt
+          cat checksums.txt
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/gpsync-*.tar.gz
+            dist/gpsync-*.zip
+            dist/gpsync-setup-*.exe
+            dist/checksums.txt

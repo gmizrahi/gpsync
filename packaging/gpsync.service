@@ -1,0 +1,37 @@
+# systemd user unit for gpsync.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp packaging/gpsync.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now gpsync
+#
+# Run it as your own user, not root: gpsync reads your photo folders and
+# stores credentials in ~/.gpsync.
+#
+# To keep it running after you log out:  loginctl enable-linger $USER
+
+[Unit]
+Description=gpsync — sync photo folders to Google Photos
+Documentation=https://github.com/gmizrahi/gpsync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Serves the web dashboard and watches the configured source folders.
+# Use "%h/.local/bin/gpsync watch" instead for no web UI.
+ExecStart=%h/.local/bin/gpsync dashboard
+Restart=on-failure
+RestartSec=30s
+
+# gpsync needs no privileges beyond your own files.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-write
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target

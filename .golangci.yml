@@ -1,0 +1,117 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - revive
+    - unconvert
+    - whitespace
+
+  settings:
+    errcheck:
+      # Each entry was checked against its call sites, not waved through.
+      # Two findings in this class were NOT excluded and were fixed instead:
+      # a failed DeleteSession on logout (the session row outlived the
+      # logout silently) and an unchecked http.Server.Serve (a callback
+      # server that never started left the OAuth consent flow hanging).
+      exclude-functions:
+        # Closing something opened for READING cannot report a lost write.
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.DB).Close
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*os.File).Close
+        - (*archive/zip.ReadCloser).Close
+        - (*github.com/gmizrahi/gpsync/internal/statedb.DB).Close
+        # Closing the filesystem watcher as the process or command exits:
+        # both sites are `defer w.Close()` on the way out, where a close
+        # error has nothing left to change.
+        - (*github.com/gmizrahi/gpsync/internal/watcher.Watcher).Close
+        # Same shape one layer down: watcher.New closes the freshly-created
+        # fsnotify watcher when no root could be watched, then returns the
+        # real error. Note this is NOT a blanket pass -- the exported
+        # Watcher.Close DOES return w.fsw.Close(), so the success path
+        # still propagates it.
+        - (*github.com/fsnotify/fsnotify.Watcher).Close
+        - (net.Listener).Close
+        - (*net/http.Server).Close
+        # Error-path cleanup. The success path closes the same writer and
+        # DOES check it (internal/backup/backup.go:138,
+        # internal/engine/duplicates.go:92) -- these are the duplicate
+        # closes on the way out of a failure that is already being
+        # returned, where a second error has nothing to add.
+        - (*archive/zip.Writer).Close
+        # Rolling back an already-committed transaction is the documented
+        # no-op that makes `defer tx.Rollback()` safe.
+        - (*database/sql.Tx).Rollback
+        # Best-effort cleanup of a temporary file; the operation's real
+        # error is already being returned.
+        - os.Remove
+        # Writing to stdout or to an HTTP response: if the client has gone
+        # or the terminal is closed, there is nowhere to report it to.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+
+    staticcheck:
+      checks:
+        - all
+        # QF1001 rewrites `!(a < b && b < c)` into De Morgan form. The three
+        # sites are ordering assertions about page sections, where the
+        # negated-range reading is the clearer one.
+        - -QF1001
+
+    gosec:
+      # Every exclusion below was reviewed against the code, not waved
+      # through. Anything not listed here is treated as a real finding.
+      excludes:
+        - G104  # duplicates errcheck, which is enabled above
+        - G202  # SQL clauses are built from ? placeholders; values travel in args
+        - G203  # template.CSS is only ever built from numbers (widths, percentages)
+        - G204  # exec is used to open a browser at a URL gpsync itself constructed
+        - G301  # trash/dupes directories hold the user's own photos, not secrets
+        - G302  # copies of the user's photos keep normal file permissions
+        - G304  # opening user-chosen photo and config paths is what the tool does
+        - G404  # math/rand is used for retry jitter only
+        - G703  # file-serving handlers validate paths against the ledger first
+        - G705  # pages render through html/template; the JSON API uses an encoder
+        - G710  # the post-login redirect is sanitised by engine.LoginRedirectTarget
+        - G117  # the OAuth credential structs are meant to be marshalled to disk
+        # G124 wants Secure on every cookie. The session cookie sets
+        # HttpOnly and SameSite=Lax, and sets Secure from r.TLS != nil --
+        # the dashboard serves plain HTTP on loopback by default, where a
+        # Secure cookie would never be sent back at all. The remaining site
+        # (cmd/gpsync/tray.go) is an OUTBOUND client cookie on gpsync's own
+        # request to the local tray, where the flag has no meaning.
+        - G124
+        # G706 flags the auth-event logging this project's own security
+        # rules require. The only user-controlled value is the username,
+        # logged with %q, which escapes control characters including
+        # newlines; the address comes from r.RemoteAddr via
+        # net.SplitHostPort, never from a request header.
+        - G706
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+
+  exclusions:
+    rules:
+      # Tests may ignore errors and use weak randomness freely.
+      - path: _test\.go
+        linters: [errcheck, gosec, bodyclose]
+
+formatters:
+  enable:
+    - gofmt
