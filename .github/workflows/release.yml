@@ -23,7 +23,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # `git describe` needs tags for the version stamp
       - uses: actions/setup-go@v5
@@ -44,7 +44,7 @@ jobs:
 
       - run: make dist-all VERSION=${{ steps.version.outputs.version }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: dist
           path: dist/
@@ -56,8 +56,8 @@ jobs:
     needs: build
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
         with:
           name: dist
           path: dist
@@ -82,7 +82,7 @@ jobs:
             "/O.\dist" `
             ".\packaging\gpsync.iss"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: installer
           path: dist/gpsync-setup-*.exe
@@ -94,12 +94,12 @@ jobs:
     permissions:
       contents: write # creating the release
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
         with:
           name: dist
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: installer
           path: dist

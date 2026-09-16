@@ -74,7 +74,13 @@ func TestNew_WatchesExistingTreeAndFiresOnChange(t *testing.T) {
 // file -- the whole point of debouncing at all.
 func TestWatcher_DebouncesBurstOfChanges(t *testing.T) {
 	root := t.TempDir()
-	w, err := New([]string{root}, testDebounce)
+	// A deliberately generous debounce, and no sleeping between the writes:
+	// a burst is meant to be a burst. With a 100ms window and a sleep in the
+	// loop, a loaded runner can stretch the burst past the window, fire
+	// early, and then fire a second time -- which is how this failed in CI
+	// while passing locally. Stays well under testTimeout.
+	const burstDebounce = time.Second
+	w, err := New([]string{root}, burstDebounce)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +88,6 @@ func TestWatcher_DebouncesBurstOfChanges(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		mustWriteFile(t, filepath.Join(root, "burst"+string(rune('a'+i))+".jpg"), []byte("x"))
-		time.Sleep(testDebounce / 4) // well inside the debounce window
 	}
 
 	got := waitReady(t, w)
@@ -90,7 +95,7 @@ func TestWatcher_DebouncesBurstOfChanges(t *testing.T) {
 		t.Errorf("Ready() folder = %q, want %q", got, root)
 	}
 	// Nothing further queued -- the burst was really one signal, not five.
-	assertNoReady(t, w, testDebounce*2)
+	assertNoReady(t, w, burstDebounce)
 }
 
 // TestWatcher_NewSubdirectoryGetsWatchedAutomatically proves the core
