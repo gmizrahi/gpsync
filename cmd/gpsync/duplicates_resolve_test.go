@@ -79,11 +79,11 @@ func (f *dupFixture) trashedPath(rel string) string {
 func TestResolveDuplicates_AutoApplyAcrossMatchingFolderSets(t *testing.T) {
 	db := openInfoTestDB(t)
 	f := newDupFixture(t)
-	f.group(t, "h1", 100, "Photos/2024_01/a.mp4", "photos/2024_01/a.mp4")
-	f.group(t, "h2", 200, "Photos/2024_01/b.mp4", "photos/2024_01/b.mp4")
-	f.group(t, "h3", 300, "Photos/2024_01/c.mp4", "photos/2024_01/c.mp4")
+	f.group(t, "h1", 100, "Library/2024_01/a.mp4", "Copies/2024_01/a.mp4")
+	f.group(t, "h2", 200, "Library/2024_01/b.mp4", "Copies/2024_01/b.mp4")
+	f.group(t, "h3", 300, "Library/2024_01/c.mp4", "Copies/2024_01/c.mp4")
 
-	// Answer group 1 by keeping the capital-P copy; then A; group 3 needs
+	// Answer group 1 by keeping the Library copy; then A; group 3 needs
 	// no answer at all.
 	out, sum := runResolve(t, db, f, false, "1", "A")
 
@@ -101,7 +101,7 @@ func TestResolveDuplicates_AutoApplyAcrossMatchingFolderSets(t *testing.T) {
 	if n := strings.Count(out, "A=keep"); n != 1 {
 		t.Errorf("the [A] option was offered %d times, want exactly 1 (only once the previous group established a folder):\n%s", n, out)
 	}
-	if !strings.Contains(out, "A=keep "+f.path("Photos/2024_01")) {
+	if !strings.Contains(out, "A=keep "+f.path("Library/2024_01")) {
 		t.Errorf("the [A] offer names the wrong folder:\n%s", out)
 	}
 	// Group 3 auto-resolved without a prompt.
@@ -114,12 +114,12 @@ func TestResolveDuplicates_AutoApplyAcrossMatchingFolderSets(t *testing.T) {
 
 	// Every kept copy is the pinned folder's; every other copy has moved to
 	// the trash, mirrored under its original path.
-	for _, rel := range []string{"Photos/2024_01/a.mp4", "Photos/2024_01/b.mp4", "Photos/2024_01/c.mp4"} {
+	for _, rel := range []string{"Library/2024_01/a.mp4", "Library/2024_01/b.mp4", "Library/2024_01/c.mp4"} {
 		if !exists(t, f.path(rel)) {
 			t.Errorf("%s should have been KEPT", rel)
 		}
 	}
-	for _, rel := range []string{"photos/2024_01/a.mp4", "photos/2024_01/b.mp4", "photos/2024_01/c.mp4"} {
+	for _, rel := range []string{"Copies/2024_01/a.mp4", "Copies/2024_01/b.mp4", "Copies/2024_01/c.mp4"} {
 		if exists(t, f.path(rel)) {
 			t.Errorf("%s should have left its original location", rel)
 		}
@@ -208,9 +208,9 @@ func TestResolveDuplicates_SkipLeavesEverythingAndKeepsThePinIntact(t *testing.T
 func TestResolveDuplicates_DryRunAsksTheSameQuestionsButDeletesNothing(t *testing.T) {
 	db := openInfoTestDB(t)
 	f := newDupFixture(t)
-	f.group(t, "h1", 100, "Photos/a.mp4", "photos/a.mp4")
-	f.group(t, "h2", 100, "Photos/b.mp4", "photos/b.mp4")
-	f.group(t, "h3", 100, "Photos/c.mp4", "photos/c.mp4")
+	f.group(t, "h1", 100, "Library/a.mp4", "Copies/a.mp4")
+	f.group(t, "h2", 100, "Library/b.mp4", "Copies/b.mp4")
+	f.group(t, "h3", 100, "Library/c.mp4", "Copies/c.mp4")
 
 	out, sum := runResolve(t, db, f, true, "1", "A")
 
@@ -223,7 +223,7 @@ func TestResolveDuplicates_DryRunAsksTheSameQuestionsButDeletesNothing(t *testin
 	}
 	// It must also show WHERE each file would go, which is the thing worth
 	// previewing.
-	if !strings.Contains(out, f.trashedPath("photos/a.mp4")) {
+	if !strings.Contains(out, f.trashedPath("Copies/a.mp4")) {
 		t.Errorf("dry run did not show the trash destination:\n%s", out)
 	}
 	if strings.Contains(out, "  trashed:") {
@@ -234,9 +234,9 @@ func TestResolveDuplicates_DryRunAsksTheSameQuestionsButDeletesNothing(t *testin
 	}
 	// Every single file must still be there.
 	for _, rel := range []string{
-		"Photos/a.mp4", "photos/a.mp4",
-		"Photos/b.mp4", "photos/b.mp4",
-		"Photos/c.mp4", "photos/c.mp4",
+		"Library/a.mp4", "Copies/a.mp4",
+		"Library/b.mp4", "Copies/b.mp4",
+		"Library/c.mp4", "Copies/c.mp4",
 	} {
 		if !exists(t, f.path(rel)) {
 			t.Errorf("--dry-run moved %s", rel)
@@ -546,7 +546,7 @@ func TestResolveDuplicates_ReportsTheTrashDestination(t *testing.T) {
 func TestResolveDuplicates_AutoAppliesUnsuffixedCopyWithinOneFolder(t *testing.T) {
 	db := openInfoTestDB(t)
 	f := newDupFixture(t)
-	const dir = "Photos/2023_06 Italy"
+	const dir = "Photos/2023_06 Lakeside"
 	f.group(t, "h1", 100, dir+"/DSC05754.JPG", dir+"/DSC05754_1.JPG", dir+"/DSC05754_2.JPG", dir+"/DSC05754_3.JPG")
 	f.group(t, "h2", 100, dir+"/DSC05753.JPG", dir+"/DSC05753_1.JPG", dir+"/DSC05753_2.JPG", dir+"/DSC05753_3.JPG")
 	f.group(t, "h3", 100, dir+"/DSC05752.JPG", dir+"/DSC05752_1.JPG", dir+"/DSC05752_2.JPG")
@@ -599,7 +599,7 @@ func TestResolveDuplicates_AutoAppliesUnsuffixedCopyWithinOneFolder(t *testing.T
 func TestResolveDuplicates_UnsuffixedPinAsksWhenTheWinnerIsNotUnique(t *testing.T) {
 	db := openInfoTestDB(t)
 	f := newDupFixture(t)
-	const dir = "Photos/2023_06 Italy"
+	const dir = "Photos/2023_06 Lakeside"
 	f.group(t, "h1", 10, dir+"/A.JPG", dir+"/A_1.JPG")
 	f.group(t, "h2", 10, dir+"/B.JPG", dir+"/B_1.JPG")
 	// A genuine tie: two copies, neither carrying a _N marker.
@@ -638,10 +638,10 @@ func TestResolveDuplicates_UnsuffixedPinAsksWhenTheWinnerIsNotUnique(t *testing.
 func TestResolveDuplicates_UnsuffixedPinClearsOnFolderChange(t *testing.T) {
 	db := openInfoTestDB(t)
 	f := newDupFixture(t)
-	f.group(t, "h1", 10, "Italy/A.JPG", "Italy/A_1.JPG")
-	f.group(t, "h2", 10, "Italy/B.JPG", "Italy/B_1.JPG")
-	f.group(t, "h3", 10, "Spain/C.JPG", "Spain/C_1.JPG") // different folder
-	f.group(t, "h4", 10, "Spain/D.JPG", "Spain/D_1.JPG")
+	f.group(t, "h1", 10, "Trips/A.JPG", "Trips/A_1.JPG")
+	f.group(t, "h2", 10, "Trips/B.JPG", "Trips/B_1.JPG")
+	f.group(t, "h3", 10, "Events/C.JPG", "Events/C_1.JPG") // different folder
+	f.group(t, "h4", 10, "Events/D.JPG", "Events/D_1.JPG")
 
 	out, sum := runResolve(t, db, f, false, "1", "A", "1", "A")
 
@@ -655,12 +655,12 @@ func TestResolveDuplicates_UnsuffixedPinClearsOnFolderChange(t *testing.T) {
 	if sum.autoApplied != 0 {
 		t.Errorf("autoApplied = %d, want 0 -- every group here was answered directly", sum.autoApplied)
 	}
-	for _, rel := range []string{"Italy/A.JPG", "Italy/B.JPG", "Spain/C.JPG", "Spain/D.JPG"} {
+	for _, rel := range []string{"Trips/A.JPG", "Trips/B.JPG", "Events/C.JPG", "Events/D.JPG"} {
 		if !exists(t, f.path(rel)) {
 			t.Errorf("%s should have been kept", rel)
 		}
 	}
-	for _, rel := range []string{"Italy/A_1.JPG", "Italy/B_1.JPG", "Spain/C_1.JPG", "Spain/D_1.JPG"} {
+	for _, rel := range []string{"Trips/A_1.JPG", "Trips/B_1.JPG", "Events/C_1.JPG", "Events/D_1.JPG"} {
 		if exists(t, f.path(rel)) {
 			t.Errorf("%s should have been trashed", rel)
 		}

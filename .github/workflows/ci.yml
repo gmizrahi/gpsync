@@ -58,9 +58,15 @@ jobs:
         with:
           go-version: stable
           check-latest: true
+      # The action's own default installs golangci-lint v1, which refuses a
+      # v2 config AND cannot target go1.26 ("the Go language version (go1.24)
+      # used to build golangci-lint is lower than the targeted Go version").
+      # This repo's .golangci.yml is v2, so the major is pinned explicitly
+      # rather than left to the action's default.
       - uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6
         with:
-          version: latest
+          version: v2.6.0
+          install-mode: goinstall
 
   vulncheck:
     runs-on: ubuntu-latest
