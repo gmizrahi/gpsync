@@ -388,3 +388,73 @@ func TestApplySettingsForm_FilesModeNeedsBothPaths(t *testing.T) {
 		})
 	}
 }
+
+// The settings form had no TLS inputs while ApplySettingsForm already
+// parsed them, so an absent field read as empty and every save silently
+// switched HTTPS back off. This locks the round trip in.
+func TestApplySettingsForm_TLSModeSurvivesASave(t *testing.T) {
+	form := validSettingsForm()
+	form.Set("dashboard_tls_mode", config.TLSModeSelfSigned)
+	form.Set("dashboard_https_port", "8443")
+
+	current := config.Defaults()
+	current.DashboardTLSMode = config.TLSModeSelfSigned
+
+	got, err := ApplySettingsForm(current, form)
+	if err != nil {
+		t.Fatalf("ApplySettingsForm error = %v, want nil", err)
+	}
+	if got.DashboardTLSMode != config.TLSModeSelfSigned {
+		t.Errorf("DashboardTLSMode = %q, want it preserved across a save", got.DashboardTLSMode)
+	}
+	if got.DashboardHTTPSPort != 8443 {
+		t.Errorf("DashboardHTTPSPort = %d, want 8443", got.DashboardHTTPSPort)
+	}
+}
+
+// Two listeners cannot share one port. Caught here rather than at startup,
+// where it would be a bind failure with a less obvious cause.
+func TestApplySettingsForm_HTTPSPortMustDifferFromHTTPPort(t *testing.T) {
+	form := validSettingsForm()
+	form.Set("dashboard_port", "8080")
+	form.Set("dashboard_https_port", "8080")
+
+	if _, err := ApplySettingsForm(config.Defaults(), form); err == nil {
+		t.Fatal("err = nil, want the port collision reported")
+	}
+}
+
+// Both auto-assign, so both being 0 is the normal fresh-install state and
+// must not read as a collision.
+func TestApplySettingsForm_BothPortsAutoAssignIsFine(t *testing.T) {
+	form := validSettingsForm()
+	form.Set("dashboard_port", "0")
+	form.Set("dashboard_https_port", "0")
+
+	got, err := ApplySettingsForm(config.Defaults(), form)
+	if err != nil {
+		t.Fatalf("ApplySettingsForm error = %v, want nil", err)
+	}
+	if got.DashboardPort != 0 || got.DashboardHTTPSPort != 0 {
+		t.Errorf("ports = %d/%d, want both 0", got.DashboardPort, got.DashboardHTTPSPort)
+	}
+}
+
+// An older cached page submits no HTTPS port field at all. That must keep
+// the stored value rather than resetting it to auto-assign, which would
+// move the port out from under anyone who had set one.
+func TestApplySettingsForm_MissingHTTPSPortField_KeepsStoredValue(t *testing.T) {
+	form := validSettingsForm()
+	form.Del("dashboard_https_port")
+
+	current := config.Defaults()
+	current.DashboardHTTPSPort = 9443
+
+	got, err := ApplySettingsForm(current, form)
+	if err != nil {
+		t.Fatalf("ApplySettingsForm error = %v, want nil", err)
+	}
+	if got.DashboardHTTPSPort != 9443 {
+		t.Errorf("DashboardHTTPSPort = %d, want the stored 9443 kept", got.DashboardHTTPSPort)
+	}
+}

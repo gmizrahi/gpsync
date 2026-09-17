@@ -131,26 +131,47 @@ func dashboardCmd() *cobra.Command {
 				IdleTimeout:       2 * time.Minute,
 			}
 			go func() {
-				var serveErr error
-				if tlsSetup.Enabled {
-					serveErr = srv.ServeTLS(ln, tlsSetup.Files.CertPath, tlsSetup.Files.KeyPath)
-				} else {
-					serveErr = srv.Serve(ln)
-				}
-				if serveErr != nil && serveErr != http.ErrServerClosed {
+				if serveErr := srv.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
 					fmt.Fprintf(os.Stderr, "dashboard server: %v\n", serveErr)
 				}
 			}()
 			defer srv.Close()
 
+			// An additional listener, not a replacement -- see the tray's
+			// startDashboard for why loopback stays plain HTTP.
+			httpsPort := 0
+			if tlsSetup.Enabled {
+				tlsLn, terr := net.Listen("tcp", fmt.Sprintf("%s:%d", host, cfg.DashboardHTTPSPort))
+				if terr != nil {
+					return fmt.Errorf("binding dashboard HTTPS listener: %w", terr)
+				}
+				httpsPort = tlsLn.Addr().(*net.TCPAddr).Port
+				tlsSrv := &http.Server{
+					Handler:           handler,
+					ReadHeaderTimeout: 10 * time.Second,
+					ReadTimeout:       30 * time.Second,
+					IdleTimeout:       2 * time.Minute,
+				}
+				go func() {
+					serveErr := tlsSrv.ServeTLS(tlsLn, tlsSetup.Files.CertPath, tlsSetup.Files.KeyPath)
+					if serveErr != nil && serveErr != http.ErrServerClosed {
+						fmt.Fprintf(os.Stderr, "dashboard HTTPS server: %v\n", serveErr)
+					}
+				}()
+				defer tlsSrv.Close()
+			}
+
 			fmt.Println(colDim(strings.Repeat("─", separatorWidth)))
-			fmt.Printf("%s %s://127.0.0.1:%d — Ctrl+C to stop.\n",
-				colHeader("Dashboard:"), webdashboard.BrowserScheme(tlsSetup), actualPort)
-			if tlsSetup.Enabled && !tlsSetup.Files.Supplied {
-				// Printed every run, not only when generated: this is what
-				// the user compares against the browser's warning, and they
-				// need it in front of them at that prompt.
-				fmt.Printf("%s %s\n", colHeader("Certificate:"), tlsSetup.Files.Fingerprint)
+			fmt.Printf("%s http://127.0.0.1:%d — Ctrl+C to stop.\n", colHeader("Dashboard:"), actualPort)
+			if tlsSetup.Enabled {
+				fmt.Printf("%s https://%s:%d\n", colHeader("     HTTPS:"), host, httpsPort)
+				if !tlsSetup.Files.Supplied {
+					// Printed every run, not only when generated: this is
+					// what the user compares against the browser's
+					// warning, and they need it in front of them at that
+					// prompt.
+					fmt.Printf("%s %s\n", colHeader("Certificate:"), tlsSetup.Files.Fingerprint)
+				}
 			}
 			fmt.Printf("%s %d folder tree(s) configured.\n", colHeader("Watching:"), len(patterns))
 

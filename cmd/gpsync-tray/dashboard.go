@@ -110,27 +110,53 @@ func startDashboard(db *statedb.DB, wc *watchController) (addr string, stop func
 	}
 
 	// See cmd/gpsync's dashboard command for why WriteTimeout stays unset.
-	srv := &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       2 * time.Minute,
+	newServer := func() *http.Server {
+		return &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+		}
 	}
+
+	srv := newServer()
 	stop = func() { srv.Close() }
 	go func() {
-		var serveErr error
-		if tlsSetup.Enabled {
-			serveErr = srv.ServeTLS(ln, tlsSetup.Files.CertPath, tlsSetup.Files.KeyPath)
-		} else {
-			serveErr = srv.Serve(ln)
-		}
-		if serveErr != nil && serveErr != http.ErrServerClosed {
+		if serveErr := srv.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
 			log.Printf("dashboard server: %v", serveErr)
 		}
 	}()
 
-	// A full URL, not host:port. The scheme has to follow the listener --
-	// callers used to prepend "http://" themselves, which would send the
-	// browser to plain HTTP on a TLS listener the moment TLS was enabled.
-	return fmt.Sprintf("%s://127.0.0.1:%d", dashboard.BrowserScheme(tlsSetup), port), stop, nil
+	// HTTPS is an ADDITIONAL listener, not a replacement: the tray and the
+	// CLI reach this dashboard over loopback, where plain HTTP costs
+	// nothing and needs no certificate trusted. TLS is for reaching it
+	// from elsewhere.
+	if tlsSetup.Enabled {
+		tlsRes, terr := dashboard.ListenPreferred(host, cfg.DashboardHTTPSPort, 5*time.Second)
+		if terr != nil {
+			log.Printf("dashboard: HTTPS listener could not bind (%v) -- HTTP is still serving on %d", terr, port)
+		} else {
+			if tlsRes.Persist {
+				cfg.DashboardHTTPSPort = tlsRes.Port
+				wc.SetConfig(cfg)
+				if serr := config.Save(cfg); serr != nil {
+					log.Printf("saving dashboard HTTPS port: %v", serr)
+				}
+			}
+			tlsSrv := newServer()
+			httpStop := stop
+			stop = func() { httpStop(); tlsSrv.Close() }
+			log.Printf("dashboard: HTTPS on port %d", tlsRes.Port)
+			go func() {
+				serveErr := tlsSrv.ServeTLS(tlsRes.Listener, tlsSetup.Files.CertPath, tlsSetup.Files.KeyPath)
+				if serveErr != nil && serveErr != http.ErrServerClosed {
+					log.Printf("dashboard HTTPS server: %v", serveErr)
+				}
+			}()
+		}
+	}
+
+	// Always the HTTP URL: this is what the tray opens, and it is a
+	// loopback address on the same machine.
+	return fmt.Sprintf("http://127.0.0.1:%d", port), stop, nil
 }

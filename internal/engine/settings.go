@@ -151,6 +151,21 @@ func ApplySettingsForm(current config.Config, values url.Values) (config.Config,
 	}
 	cfg.DashboardPort = port
 
+	httpsPortStr := strings.TrimSpace(values.Get("dashboard_https_port"))
+	if httpsPortStr == "" {
+		// An older cached page has no such field; keep what is stored
+		// rather than resetting the port to auto-assign.
+		httpsPortStr = strconv.Itoa(cfg.DashboardHTTPSPort)
+	}
+	httpsPort, herr := strconv.Atoi(httpsPortStr)
+	if herr != nil || httpsPort < 0 || httpsPort > 65535 {
+		return current, fmt.Errorf("dashboard HTTPS port must be a whole number from 0 (auto-assign) to 65535 (got %q)", httpsPortStr)
+	}
+	if httpsPort != 0 && httpsPort == cfg.DashboardPort {
+		return current, fmt.Errorf("the HTTPS port must differ from the HTTP port (both are %d)", httpsPort)
+	}
+	cfg.DashboardHTTPSPort = httpsPort
+
 	cfg.DashboardAuthEnabled = values.Get("dashboard_auth_enabled") != ""
 	cfg.DashboardAuthUser = strings.TrimSpace(values.Get("dashboard_auth_user"))
 	// Write-only, like every password field: a blank submission means

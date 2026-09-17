@@ -143,7 +143,13 @@ type Config struct {
 	// tray serves on a temporary port for that session and logs why -- it
 	// used to re-cache the temporary port, which silently replaced the
 	// user's choice (see dashboard.ListenPreferred).
-	DashboardPort        int  `toml:"dashboard_port"`
+	DashboardPort int `toml:"dashboard_port"`
+	// DashboardHTTPSPort is the port the TLS listener uses when
+	// DashboardTLSMode is anything but off. Separate from DashboardPort so
+	// both can listen at once: the tray and CLI reach the dashboard over
+	// plain HTTP on loopback, while HTTPS serves everything else. Cached on
+	// first bind exactly like DashboardPort.
+	DashboardHTTPSPort   int  `toml:"dashboard_https_port"`
 	DashboardAuthEnabled bool `toml:"dashboard_auth_enabled"`
 	// DashboardBindGuarded is set by Load when it had to pull
 	// DashboardListenAddr back to loopback because the configured address
@@ -246,6 +252,7 @@ func Defaults() Config {
 		SyncStrategy:                  SyncStrategyFolderByFolder,
 		DashboardListenAddr:           DashboardListenLocal,
 		DashboardPort:                 0,
+		DashboardHTTPSPort:            0,
 		DashboardAuthEnabled:          false,
 		DashboardTLSMode:              TLSModeOff,
 	}
