@@ -33,6 +33,13 @@ func TestProbe_RawEventNames(t *testing.T) {
 		}
 	}
 
+	// Windows only. This probe reports by FAILING (the only output channel a
+	// CI log always prints), and the test matrix is fail-fast -- so failing
+	// on Linux cancelled the very Windows job the probe exists to read.
+	if runtime.GOOS != "windows" {
+		t.Skip("probe only reports on Windows; failing here cancels the Windows job")
+	}
+
 	var seen []string
 	done := make(chan struct{})
 	go func() {
