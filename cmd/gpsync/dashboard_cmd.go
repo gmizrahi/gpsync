@@ -111,6 +111,14 @@ func dashboardCmd() *cobra.Command {
 			}
 			actualPort := ln.Addr().(*net.TCPAddr).Port
 
+			// Resolved before serving so a certificate problem is a clear
+			// startup error, not a listener that accepts connections and
+			// then fails every handshake.
+			tlsSetup, err := webdashboard.TLSSetupFor(cfg, statedb.StateDir, webdashboard.DefaultCertHosts(), time.Now())
+			if err != nil {
+				return fmt.Errorf("dashboard TLS: %w", err)
+			}
+
 			handler := webdashboard.Handler(db, ctrl, webdashboard.Options{AppName: "gpsync"})
 			// Header/idle timeouts bound a stalled or slow-loris client.
 			// WriteTimeout stays unset on purpose: the dashboard serves
@@ -123,14 +131,27 @@ func dashboardCmd() *cobra.Command {
 				IdleTimeout:       2 * time.Minute,
 			}
 			go func() {
-				if serveErr := srv.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
+				var serveErr error
+				if tlsSetup.Enabled {
+					serveErr = srv.ServeTLS(ln, tlsSetup.Files.CertPath, tlsSetup.Files.KeyPath)
+				} else {
+					serveErr = srv.Serve(ln)
+				}
+				if serveErr != nil && serveErr != http.ErrServerClosed {
 					fmt.Fprintf(os.Stderr, "dashboard server: %v\n", serveErr)
 				}
 			}()
 			defer srv.Close()
 
 			fmt.Println(colDim(strings.Repeat("─", separatorWidth)))
-			fmt.Printf("%s http://127.0.0.1:%d — Ctrl+C to stop.\n", colHeader("Dashboard:"), actualPort)
+			fmt.Printf("%s %s://127.0.0.1:%d — Ctrl+C to stop.\n",
+				colHeader("Dashboard:"), webdashboard.BrowserScheme(tlsSetup), actualPort)
+			if tlsSetup.Enabled && !tlsSetup.Files.Supplied {
+				// Printed every run, not only when generated: this is what
+				// the user compares against the browser's warning, and they
+				// need it in front of them at that prompt.
+				fmt.Printf("%s %s\n", colHeader("Certificate:"), tlsSetup.Files.Fingerprint)
+			}
 			fmt.Printf("%s %d folder tree(s) configured.\n", colHeader("Watching:"), len(patterns))
 
 			// Runs until handleInterrupts' own signal handler calls

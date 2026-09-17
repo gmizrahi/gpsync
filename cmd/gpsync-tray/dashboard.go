@@ -32,9 +32,12 @@ import (
 // toggle, and cleanly ending the process after a destructive backup
 // restore).
 //
-// Returns the address a LOCAL browser should use (127.0.0.1, regardless
-// of which interface(s) the listener actually bound -- 0.0.0.0 itself
-// isn't a meaningful destination to navigate to) plus a shutdown func.
+// Returns a full URL a LOCAL browser should use (always 127.0.0.1,
+// regardless of which interface(s) the listener actually bound -- 0.0.0.0
+// itself isn't a meaningful destination to navigate to) plus a shutdown
+// func. The scheme is part of it deliberately: callers used to prepend
+// "http://" themselves, which would open plain HTTP against a TLS
+// listener the moment dashboard_tls_mode was turned on.
 func startDashboard(db *statedb.DB, wc *watchController) (addr string, stop func(), err error) {
 	cfg := wc.Config()
 	if cfg.DashboardBindGuarded {
@@ -87,6 +90,33 @@ func startDashboard(db *statedb.DB, wc *watchController) (addr string, stop func
 		QuitGracefully: func() { gracefulQuit(wc, db, stop) },
 	})
 
+	// Resolved before the server starts so a certificate problem is a
+	// startup error with a reason, not a listener that accepts connections
+	// and then fails every handshake.
+	tlsSetup, err := dashboard.TLSSetupFor(cfg, statedb.StateDir, dashboard.DefaultCertHosts(), time.Now())
+	if err != nil {
+		ln.Close()
+		return "", nil, fmt.Errorf("dashboard TLS: %w", err)
+	}
+	if cfg.DashboardTLSGuarded {
+		// config.Load downgraded acme because auth is off. Said out loud
+		// for the same reason the bind guard above is: a silently changed
+		// mode reads as the setting having been ignored.
+		log.Printf("dashboard: TLS mode %q needs dashboard authentication, so using %q instead -- "+
+			"turn on dashboard auth in Settings to use a publicly-trusted certificate",
+			config.TLSModeAcme, config.TLSModeSelfSigned)
+	}
+	if tlsSetup.Enabled {
+		if tlsSetup.Files.Generated {
+			log.Printf("dashboard: generated a self-signed certificate at %s", tlsSetup.Files.CertPath)
+		}
+		// Logged every start, not just on generation: it is what the user
+		// compares against the browser's warning, and they need it in
+		// front of them at the moment they hit that prompt.
+		log.Printf("dashboard: TLS certificate SHA-256 %s (expires %s)",
+			tlsSetup.Files.Fingerprint, tlsSetup.Files.NotAfter.Format("2006-01-02"))
+	}
+
 	// See cmd/gpsync's dashboard command for why WriteTimeout stays unset.
 	srv := &http.Server{
 		Handler:           handler,
@@ -96,10 +126,19 @@ func startDashboard(db *statedb.DB, wc *watchController) (addr string, stop func
 	}
 	stop = func() { srv.Close() }
 	go func() {
-		if serveErr := srv.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
+		var serveErr error
+		if tlsSetup.Enabled {
+			serveErr = srv.ServeTLS(ln, tlsSetup.Files.CertPath, tlsSetup.Files.KeyPath)
+		} else {
+			serveErr = srv.Serve(ln)
+		}
+		if serveErr != nil && serveErr != http.ErrServerClosed {
 			log.Printf("dashboard server: %v", serveErr)
 		}
 	}()
 
-	return fmt.Sprintf("127.0.0.1:%d", port), stop, nil
+	// A full URL, not host:port. The scheme has to follow the listener --
+	// callers used to prepend "http://" themselves, which would send the
+	// browser to plain HTTP on a TLS listener the moment TLS was enabled.
+	return fmt.Sprintf("%s://127.0.0.1:%d", dashboard.BrowserScheme(tlsSetup), port), stop, nil
 }

@@ -159,7 +159,7 @@ func onReady() {
 			log.Println("dashboard server never started successfully")
 			return
 		}
-		if err := open.Start("http://" + addr); err != nil {
+		if err := open.Start(addr); err != nil {
 			log.Printf("opening dashboard (double-click): %v", err)
 		}
 	})
@@ -188,7 +188,7 @@ func onReady() {
 					log.Println("dashboard server never started successfully")
 					continue
 				}
-				if err := open.Start("http://" + addr); err != nil {
+				if err := open.Start(addr); err != nil {
 					log.Printf("opening dashboard: %v", err)
 				}
 			case <-browseItem.ClickedCh:
@@ -196,7 +196,7 @@ func onReady() {
 					log.Println("dashboard server never started successfully")
 					continue
 				}
-				if err := open.Start("http://" + addr + "/browse"); err != nil {
+				if err := open.Start(addr + "/browse"); err != nil {
 					log.Printf("opening browse: %v", err)
 				}
 			case <-settingsItem.ClickedCh:
@@ -204,7 +204,7 @@ func onReady() {
 					log.Println("dashboard server never started successfully")
 					continue
 				}
-				if err := open.Start("http://" + addr + "/settings"); err != nil {
+				if err := open.Start(addr + "/settings"); err != nil {
 					log.Printf("opening settings: %v", err)
 				}
 			case <-logsItem.ClickedCh:
