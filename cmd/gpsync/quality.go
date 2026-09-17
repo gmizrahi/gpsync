@@ -89,7 +89,7 @@ func qualityCmd() *cobra.Command {
 // the files whose remote quality is unknown, and re-sending the local
 // original makes Google upgrade the stored copy in place rather than
 // duplicating it. That observed merge behaviour is the whole reason this
-// project refuses to reconcile against the API (see .ai/CLAUDE.md), and
+// project deliberately never reconciles against the API, and
 // this is the command that finally acts on it.
 //
 // Dry-run by default, matching recheck/fix-dates/clean-originals: it can

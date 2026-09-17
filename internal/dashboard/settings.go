@@ -198,7 +198,7 @@ var settingsTmpl = template.Must(template.New("settings").Parse(`
         <option value="original" {{if eq .UploadQuality "original"}}selected{{end}}>Original (no re-encoding)</option>
         <option value="space_saver" {{if eq .UploadQuality "space_saver"}}selected{{end}}>Space saver (downscale + re-encode)</option>
       </select>
-      <div class="hint">Space saver strips EXIF (including capture date) -- see .ai/CLAUDE.md if that matters to you.</div>
+      <div class="hint">Re-encodes photos smaller before uploading, to use less of your Google storage. Capture dates are preserved. Google has no API option for their own Storage saver tier -- the API always stores exactly the bytes sent.</div>
     </div>
     <div id="space-saver-fields" {{if ne .UploadQuality "space_saver"}}style="display:none"{{end}}>
       <div class="field">

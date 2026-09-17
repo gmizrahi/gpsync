@@ -45,7 +45,7 @@ var (
 //
 // Deliberately NOT requested: photoslibrary.readonly.appcreateddata. It
 // existed only for the removed reconcile-against-the-API feature (see
-// .ai/CLAUDE.md's "No reconcile-against-the-API step" rule); gpsync never reads
+// gpsync deliberately never reconciles against the API, so it never reads
 // media items back from Google, so asking for read access on a fresh
 // consent screen would be requesting more than the tool needs. Dropping it
 // only affects NEW consent flows (`gpsync setup`/`gpsync import-rclone`) —
