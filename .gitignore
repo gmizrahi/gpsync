@@ -5,6 +5,11 @@
 *.exe
 *.test
 *.out
+# The documented dev build (`go build -o gpsync ./cmd/gpsync`) drops a
+# binary right here, where nothing above matches it -- one `git add -A`
+# from being committed to a public repo.
+/gpsync
+/gpsync-tray
 
 # Local AI working notes — never published
 .ai/

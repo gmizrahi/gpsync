@@ -44,7 +44,12 @@ address without it.
 
 When login is enabled, sessions are cookie-based, passwords are bcrypt-hashed,
 repeated failures are rate-limited, and every mutating request is CSRF-checked.
-There is no TLS yet — use a reverse proxy if you need HTTPS.
+
+Set `dashboard_tls_mode` to serve HTTPS as well: `self-signed` has gpsync
+generate a certificate, `files` uses one you supply. HTTPS listens on its own
+port alongside HTTP, so the tray still opens the local address directly. A
+generated certificate makes the browser warn once — gpsync logs its SHA-256
+fingerprint at startup so you can check it before trusting it.
 
 ## Phone layout
 

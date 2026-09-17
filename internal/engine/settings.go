@@ -151,6 +151,21 @@ func ApplySettingsForm(current config.Config, values url.Values) (config.Config,
 	}
 	cfg.DashboardPort = port
 
+	httpsPortStr := strings.TrimSpace(values.Get("dashboard_https_port"))
+	if httpsPortStr == "" {
+		// An older cached page has no such field; keep what is stored
+		// rather than resetting the port to auto-assign.
+		httpsPortStr = strconv.Itoa(cfg.DashboardHTTPSPort)
+	}
+	httpsPort, herr := strconv.Atoi(httpsPortStr)
+	if herr != nil || httpsPort < 0 || httpsPort > 65535 {
+		return current, fmt.Errorf("dashboard HTTPS port must be a whole number from 0 (auto-assign) to 65535 (got %q)", httpsPortStr)
+	}
+	if httpsPort != 0 && httpsPort == cfg.DashboardPort {
+		return current, fmt.Errorf("the HTTPS port must differ from the HTTP port (both are %d)", httpsPort)
+	}
+	cfg.DashboardHTTPSPort = httpsPort
+
 	cfg.DashboardAuthEnabled = values.Get("dashboard_auth_enabled") != ""
 	cfg.DashboardAuthUser = strings.TrimSpace(values.Get("dashboard_auth_user"))
 	// Write-only, like every password field: a blank submission means
@@ -178,6 +193,31 @@ func ApplySettingsForm(current config.Config, values url.Values) (config.Config,
 		return current, fmt.Errorf("listening on %s exposes the dashboard to the network, so it requires authentication: "+
 			"either turn on dashboard auth (with a username and password) or set the listen address to %s for this device only",
 			cfg.DashboardListenAddr, config.DashboardListenLocal)
+	}
+
+	// Dashboard TLS. An unrecognised mode is named rather than quietly
+	// treated as "off" -- serving plain HTTP to someone who believes they
+	// switched HTTPS on is the worst outcome available here.
+	tlsMode := strings.TrimSpace(values.Get("dashboard_tls_mode"))
+	if tlsMode == "" {
+		tlsMode = config.TLSModeOff
+	}
+	if !config.TLSModeValid(tlsMode) {
+		return current, fmt.Errorf("dashboard TLS mode must be %q, %q, or %q (got %q)",
+			config.TLSModeOff, config.TLSModeSelfSigned, config.TLSModeFiles, tlsMode)
+	}
+	cfg.DashboardTLSMode = tlsMode
+	cfg.DashboardTLSCertFile = strings.TrimSpace(values.Get("dashboard_tls_cert_file"))
+	cfg.DashboardTLSKeyFile = strings.TrimSpace(values.Get("dashboard_tls_key_file"))
+
+	switch cfg.DashboardTLSMode {
+	case config.TLSModeFiles:
+		// Half a pair cannot work: gpsync would have to invent the missing
+		// half, and every handshake would fail looking like a corrupt file
+		// rather than the configuration mistake it is.
+		if cfg.DashboardTLSCertFile == "" || cfg.DashboardTLSKeyFile == "" {
+			return current, fmt.Errorf("TLS mode %q needs both a certificate file and a key file", config.TLSModeFiles)
+		}
 	}
 
 	return cfg, nil

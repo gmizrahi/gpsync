@@ -46,8 +46,12 @@ those folders until you do.
 
 It binds to loopback by default: <http://127.0.0.1:10924>. To reach it from
 another device, enable login in Settings first — gpsync refuses to bind a
-non-loopback address without authentication. There is no TLS; put it behind a
-reverse proxy if you need HTTPS.
+non-loopback address without authentication.
+
+For HTTPS, set `dashboard_tls_mode` to `self-signed` and gpsync generates a
+certificate for you, or to `files` to use your own. HTTPS listens on its own
+port alongside HTTP, so the tray keeps opening the local address unchanged.
+See [configuration](configuration.md) for the settings.
 
 ## Stopping it
 

@@ -82,7 +82,7 @@ type Options struct {
 // since in practice exactly one dashboard server exists per process; a
 // test calling Handler() sets these the same way a real caller does.
 var (
-	appName        = "gpsync"
+	appName        = "GPhotos Sync"
 	favicon        []byte
 	autostartCtrl  AutostartController
 	shutdown       func()

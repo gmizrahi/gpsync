@@ -32,9 +32,12 @@ import (
 // toggle, and cleanly ending the process after a destructive backup
 // restore).
 //
-// Returns the address a LOCAL browser should use (127.0.0.1, regardless
-// of which interface(s) the listener actually bound -- 0.0.0.0 itself
-// isn't a meaningful destination to navigate to) plus a shutdown func.
+// Returns a full URL a LOCAL browser should use (always 127.0.0.1,
+// regardless of which interface(s) the listener actually bound -- 0.0.0.0
+// itself isn't a meaningful destination to navigate to) plus a shutdown
+// func. The scheme is part of it deliberately: callers used to prepend
+// "http://" themselves, which would open plain HTTP against a TLS
+// listener the moment dashboard_tls_mode was turned on.
 func startDashboard(db *statedb.DB, wc *watchController) (addr string, stop func(), err error) {
 	cfg := wc.Config()
 	if cfg.DashboardBindGuarded {
@@ -87,13 +90,36 @@ func startDashboard(db *statedb.DB, wc *watchController) (addr string, stop func
 		QuitGracefully: func() { gracefulQuit(wc, db, stop) },
 	})
 
-	// See cmd/gpsync's dashboard command for why WriteTimeout stays unset.
-	srv := &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       2 * time.Minute,
+	// Resolved before the server starts so a certificate problem is a
+	// startup error with a reason, not a listener that accepts connections
+	// and then fails every handshake.
+	tlsSetup, err := dashboard.TLSSetupFor(cfg, statedb.StateDir, dashboard.DefaultCertHosts(), time.Now())
+	if err != nil {
+		ln.Close()
+		return "", nil, fmt.Errorf("dashboard TLS: %w", err)
 	}
+	if tlsSetup.Enabled {
+		if tlsSetup.Files.Generated {
+			log.Printf("dashboard: generated a self-signed certificate at %s", tlsSetup.Files.CertPath)
+		}
+		// Logged every start, not just on generation: it is what the user
+		// compares against the browser's warning, and they need it in
+		// front of them at the moment they hit that prompt.
+		log.Printf("dashboard: TLS certificate SHA-256 %s (expires %s)",
+			tlsSetup.Files.Fingerprint, tlsSetup.Files.NotAfter.Format("2006-01-02"))
+	}
+
+	// See cmd/gpsync's dashboard command for why WriteTimeout stays unset.
+	newServer := func() *http.Server {
+		return &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+		}
+	}
+
+	srv := newServer()
 	stop = func() { srv.Close() }
 	go func() {
 		if serveErr := srv.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
@@ -101,5 +127,36 @@ func startDashboard(db *statedb.DB, wc *watchController) (addr string, stop func
 		}
 	}()
 
-	return fmt.Sprintf("127.0.0.1:%d", port), stop, nil
+	// HTTPS is an ADDITIONAL listener, not a replacement: the tray and the
+	// CLI reach this dashboard over loopback, where plain HTTP costs
+	// nothing and needs no certificate trusted. TLS is for reaching it
+	// from elsewhere.
+	if tlsSetup.Enabled {
+		tlsRes, terr := dashboard.ListenPreferred(host, cfg.DashboardHTTPSPort, 5*time.Second)
+		if terr != nil {
+			log.Printf("dashboard: HTTPS listener could not bind (%v) -- HTTP is still serving on %d", terr, port)
+		} else {
+			if tlsRes.Persist {
+				cfg.DashboardHTTPSPort = tlsRes.Port
+				wc.SetConfig(cfg)
+				if serr := config.Save(cfg); serr != nil {
+					log.Printf("saving dashboard HTTPS port: %v", serr)
+				}
+			}
+			tlsSrv := newServer()
+			httpStop := stop
+			stop = func() { httpStop(); tlsSrv.Close() }
+			log.Printf("dashboard: HTTPS on port %d", tlsRes.Port)
+			go func() {
+				serveErr := tlsSrv.ServeTLS(tlsRes.Listener, tlsSetup.Files.CertPath, tlsSetup.Files.KeyPath)
+				if serveErr != nil && serveErr != http.ErrServerClosed {
+					log.Printf("dashboard HTTPS server: %v", serveErr)
+				}
+			}()
+		}
+	}
+
+	// Always the HTTP URL: this is what the tray opens, and it is a
+	// loopback address on the same machine.
+	return fmt.Sprintf("http://127.0.0.1:%d", port), stop, nil
 }

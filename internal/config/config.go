@@ -143,7 +143,13 @@ type Config struct {
 	// tray serves on a temporary port for that session and logs why -- it
 	// used to re-cache the temporary port, which silently replaced the
 	// user's choice (see dashboard.ListenPreferred).
-	DashboardPort        int  `toml:"dashboard_port"`
+	DashboardPort int `toml:"dashboard_port"`
+	// DashboardHTTPSPort is the port the TLS listener uses when
+	// DashboardTLSMode is anything but off. Separate from DashboardPort so
+	// both can listen at once: the tray and CLI reach the dashboard over
+	// plain HTTP on loopback, while HTTPS serves everything else. Cached on
+	// first bind exactly like DashboardPort.
+	DashboardHTTPSPort   int  `toml:"dashboard_https_port"`
 	DashboardAuthEnabled bool `toml:"dashboard_auth_enabled"`
 	// DashboardBindGuarded is set by Load when it had to pull
 	// DashboardListenAddr back to loopback because the configured address
@@ -160,6 +166,45 @@ type Config struct {
 	// ApplySettingsForm): submitting it blank means "keep the existing
 	// hash", never derived from what's already stored.
 	DashboardAuthPassHash string `toml:"dashboard_auth_pass_hash"`
+
+	// DashboardTLSMode selects where the dashboard's certificate comes
+	// from, or TLSModeOff to serve plain HTTP. Deliberately one field
+	// rather than a separate enabled/mode pair: two switches would allow
+	// the nonsensical "enabled, but mode off", and a setting that encodes
+	// one fact in two places drifts.
+	//
+	// Off by default. v0.1.0 shipped plain HTTP, so turning TLS on by
+	// itself would change the scheme under anyone holding a saved http://
+	// bookmark. Like the fields above, it takes effect on the next restart.
+	DashboardTLSMode string `toml:"dashboard_tls_mode"`
+	// DashboardTLSCertFile/DashboardTLSKeyFile are a certificate and key
+	// the user manages -- mkcert, a home CA, or a real CA. Read in
+	// TLSModeFiles and never written to: regenerating over a key gpsync
+	// did not create would destroy it.
+	DashboardTLSCertFile string `toml:"dashboard_tls_cert_file"`
+	DashboardTLSKeyFile  string `toml:"dashboard_tls_key_file"`
+}
+
+// The DashboardTLSMode values. TLSModeSelfSigned generates and manages a
+// certificate under ~/.gpsync and is the only mode that needs no domain at
+// all, which is why it suits the default deployment on loopback or a LAN
+// address.
+const (
+	TLSModeOff        = "off"
+	TLSModeSelfSigned = "self-signed"
+	TLSModeFiles      = "files"
+)
+
+// TLSModeValid reports whether mode is one gpsync understands. Exported so
+// engine.ApplySettingsForm can reject exactly what Load would otherwise
+// have to correct -- the same reason BindNeedsAuth is exported, and the
+// same drift it exists to prevent.
+func TLSModeValid(mode string) bool {
+	switch mode {
+	case TLSModeOff, TLSModeSelfSigned, TLSModeFiles:
+		return true
+	}
+	return false
 }
 
 const (
@@ -207,7 +252,9 @@ func Defaults() Config {
 		SyncStrategy:                  SyncStrategyFolderByFolder,
 		DashboardListenAddr:           DashboardListenLocal,
 		DashboardPort:                 0,
+		DashboardHTTPSPort:            0,
 		DashboardAuthEnabled:          false,
+		DashboardTLSMode:              TLSModeOff,
 	}
 }
 
@@ -270,6 +317,22 @@ func Load() (Config, error) {
 	if BindNeedsAuth(cfg.DashboardListenAddr) && !cfg.DashboardAuthEnabled {
 		cfg.DashboardListenAddr = DashboardListenLocal
 		cfg.DashboardBindGuarded = true
+	}
+	// A config.toml predating this field is already handled: the key is
+	// absent, so toml.Unmarshal leaves Defaults()' "off" in place.
+	//
+	// This covers the case that is NOT handled that way -- a hand-edited
+	// `dashboard_tls_mode = ""`, where the key IS present, so Unmarshal
+	// overwrites the default with an empty string. Hand-editing config.toml
+	// is a supported path (the same reason the watch-interval clamp above
+	// exists), and an empty value plainly means "not configured".
+	//
+	// An UNRECOGNISED value is deliberately left alone rather than
+	// normalised to "off": serving plain HTTP to someone who believes they
+	// turned TLS on is the worst outcome available, so the server reports
+	// it rather than silently continuing.
+	if strings.TrimSpace(cfg.DashboardTLSMode) == "" {
+		cfg.DashboardTLSMode = TLSModeOff
 	}
 	return cfg, nil
 }

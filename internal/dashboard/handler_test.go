@@ -17,7 +17,7 @@ import (
 func TestHandler_StatusPage_Renders200(t *testing.T) {
 	db := openTestDB(t)
 	ctrl := newFakeController()
-	srv := newTestServer(t, db, ctrl, Options{AppName: "gpsync"})
+	srv := newTestServer(t, db, ctrl, Options{AppName: "GPhotos Sync"})
 	client := newTestClient(t)
 
 	resp := mustGet(t, client, srv.URL+"/")

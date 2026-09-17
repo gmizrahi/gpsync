@@ -111,7 +111,15 @@ func dashboardCmd() *cobra.Command {
 			}
 			actualPort := ln.Addr().(*net.TCPAddr).Port
 
-			handler := webdashboard.Handler(db, ctrl, webdashboard.Options{AppName: "gpsync"})
+			// Resolved before serving so a certificate problem is a clear
+			// startup error, not a listener that accepts connections and
+			// then fails every handshake.
+			tlsSetup, err := webdashboard.TLSSetupFor(cfg, statedb.StateDir, webdashboard.DefaultCertHosts(), time.Now())
+			if err != nil {
+				return fmt.Errorf("dashboard TLS: %w", err)
+			}
+
+			handler := webdashboard.Handler(db, ctrl, webdashboard.Options{AppName: "GPhotos Sync"})
 			// Header/idle timeouts bound a stalled or slow-loris client.
 			// WriteTimeout stays unset on purpose: the dashboard serves
 			// full-resolution originals, and a large video download must
@@ -129,8 +137,42 @@ func dashboardCmd() *cobra.Command {
 			}()
 			defer srv.Close()
 
+			// An additional listener, not a replacement -- see the tray's
+			// startDashboard for why loopback stays plain HTTP.
+			httpsPort := 0
+			if tlsSetup.Enabled {
+				tlsLn, terr := net.Listen("tcp", fmt.Sprintf("%s:%d", host, cfg.DashboardHTTPSPort))
+				if terr != nil {
+					return fmt.Errorf("binding dashboard HTTPS listener: %w", terr)
+				}
+				httpsPort = tlsLn.Addr().(*net.TCPAddr).Port
+				tlsSrv := &http.Server{
+					Handler:           handler,
+					ReadHeaderTimeout: 10 * time.Second,
+					ReadTimeout:       30 * time.Second,
+					IdleTimeout:       2 * time.Minute,
+				}
+				go func() {
+					serveErr := tlsSrv.ServeTLS(tlsLn, tlsSetup.Files.CertPath, tlsSetup.Files.KeyPath)
+					if serveErr != nil && serveErr != http.ErrServerClosed {
+						fmt.Fprintf(os.Stderr, "dashboard HTTPS server: %v\n", serveErr)
+					}
+				}()
+				defer tlsSrv.Close()
+			}
+
 			fmt.Println(colDim(strings.Repeat("─", separatorWidth)))
 			fmt.Printf("%s http://127.0.0.1:%d — Ctrl+C to stop.\n", colHeader("Dashboard:"), actualPort)
+			if tlsSetup.Enabled {
+				fmt.Printf("%s https://%s:%d\n", colHeader("     HTTPS:"), host, httpsPort)
+				if !tlsSetup.Files.Supplied {
+					// Printed every run, not only when generated: this is
+					// what the user compares against the browser's
+					// warning, and they need it in front of them at that
+					// prompt.
+					fmt.Printf("%s %s\n", colHeader("Certificate:"), tlsSetup.Files.Fingerprint)
+				}
+			}
 			fmt.Printf("%s %d folder tree(s) configured.\n", colHeader("Watching:"), len(patterns))
 
 			// Runs until handleInterrupts' own signal handler calls

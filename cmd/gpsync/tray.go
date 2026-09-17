@@ -31,7 +31,16 @@ func trayDashboardURL(cfg config.Config) string {
 	if cfg.DashboardPort == 0 {
 		return ""
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d/api/status", cfg.DashboardPort)
+	return trayDashboardBase(cfg) + "/api/status"
+}
+
+// trayDashboardBase is the host and port every request to a running tray
+// starts from. Always plain HTTP: this is loopback-only traffic between
+// two processes on the same machine, so there is nothing on the wire for
+// TLS to protect. HTTPS, when enabled, is for reaching the dashboard from
+// elsewhere and listens on its own port.
+func trayDashboardBase(cfg config.Config) string {
+	return fmt.Sprintf("http://127.0.0.1:%d", cfg.DashboardPort)
 }
 
 // trayRunningNotice checks whether gpsync-tray's dashboard is currently
@@ -57,7 +66,7 @@ func trayRunningNotice(cfg config.Config) string {
 		return ""
 	}
 	resp.Body.Close()
-	return fmt.Sprintf("gpsync-tray is currently running (dashboard: http://127.0.0.1:%d) -- safe to run alongside; you may see overlapping activity.", cfg.DashboardPort)
+	return fmt.Sprintf("gpsync-tray is currently running (dashboard: %s) -- safe to run alongside; you may see overlapping activity.", trayDashboardBase(cfg))
 }
 
 // trayQuitCmd asks a running gpsync-tray to shut down gracefully -- in-flight
@@ -106,7 +115,7 @@ func trayQuitCmd() *cobra.Command {
 				fmt.Println("gpsync-tray does not appear to have run yet (no dashboard port recorded) -- nothing to quit.")
 				return nil
 			}
-			url := fmt.Sprintf("http://127.0.0.1:%d/api/quit", cfg.DashboardPort)
+			url := trayDashboardBase(cfg) + "/api/quit"
 			req, err := http.NewRequest(http.MethodPost, url, nil)
 			if err != nil {
 				return err

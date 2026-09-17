@@ -181,3 +181,119 @@ func TestBindNeedsAuth(t *testing.T) {
 		}
 	}
 }
+
+// A fresh install must have a concrete mode, not an empty string: every
+// later check reads this field, and "" is not a value TLSModeValid accepts.
+func TestDefaults_TLSModeOff(t *testing.T) {
+	if got := Defaults().DashboardTLSMode; got != TLSModeOff {
+		t.Errorf("DashboardTLSMode = %q, want %q", got, TLSModeOff)
+	}
+}
+
+// A config.toml predating this field omits the key entirely, so Defaults()
+// supplies "off" and Unmarshal leaves it alone. This guards that path --
+// note it does NOT exercise Load's empty-string normalisation, which needs
+// the key to be present; TestLoad_HandEditedEmptyTLSMode_DefaultsToOff
+// covers that.
+func TestLoad_ConfigWithoutTLSMode_DefaultsToOff(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GPSYNC_STATE_DIR", dir)
+	ConfigPath = filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(ConfigPath, []byte("concurrency = 4\n"), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DashboardTLSMode != TLSModeOff {
+		t.Errorf("DashboardTLSMode = %q, want %q for a config predating the field", cfg.DashboardTLSMode, TLSModeOff)
+	}
+}
+
+// An unrecognised mode is NOT normalised away. Quietly turning a typo into
+// "off" would serve plain HTTP to someone who believes they enabled TLS --
+// the one outcome worth failing loudly over.
+func TestLoad_UnknownTLSMode_IsPreservedNotSilentlyDisabled(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GPSYNC_STATE_DIR", dir)
+	ConfigPath = filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(ConfigPath, []byte("dashboard_tls_mode = \"selfsigned\"\n"), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DashboardTLSMode != "selfsigned" {
+		t.Errorf("DashboardTLSMode = %q, want the typo preserved so it can be reported", cfg.DashboardTLSMode)
+	}
+	if TLSModeValid(cfg.DashboardTLSMode) {
+		t.Error("TLSModeValid accepted a near-miss spelling")
+	}
+}
+
+func TestSaveLoad_RoundTripsTLSSettings(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GPSYNC_STATE_DIR", dir)
+	ConfigPath = filepath.Join(dir, "config.toml")
+
+	cfg := Defaults()
+	// Auth on, or Load would correctly downgrade acme to self-signed and
+	// this would be testing the clamp rather than the round trip.
+	cfg.DashboardAuthEnabled = true
+	cfg.DashboardAuthUser = "admin"
+	cfg.DashboardAuthPassHash = "not-a-real-hash"
+	cfg.DashboardTLSMode = TLSModeFiles
+	cfg.DashboardTLSCertFile = filepath.Join("C:\\certs", "gpsync.crt")
+	cfg.DashboardTLSKeyFile = filepath.Join("C:\\certs", "gpsync.key")
+
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.DashboardTLSMode != cfg.DashboardTLSMode ||
+		got.DashboardTLSCertFile != cfg.DashboardTLSCertFile ||
+		got.DashboardTLSKeyFile != cfg.DashboardTLSKeyFile {
+		t.Errorf("TLS settings did not survive a round trip: %+v", got)
+	}
+}
+
+func TestTLSModeValid(t *testing.T) {
+	for _, m := range []string{TLSModeOff, TLSModeSelfSigned, TLSModeFiles} {
+		if !TLSModeValid(m) {
+			t.Errorf("TLSModeValid(%q) = false, want true", m)
+		}
+	}
+	for _, m := range []string{"", "selfsigned", "self signed", "acme", "on", "true"} {
+		if TLSModeValid(m) {
+			t.Errorf("TLSModeValid(%q) = true, want false", m)
+		}
+	}
+}
+
+// The case Load's normalisation actually exists for: the key is PRESENT but
+// empty, so Unmarshal overwrites Defaults()' value with "". Hand-editing
+// config.toml is a supported path, and an empty value means "not
+// configured", not "an invalid mode".
+func TestLoad_HandEditedEmptyTLSMode_DefaultsToOff(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GPSYNC_STATE_DIR", dir)
+	ConfigPath = filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(ConfigPath, []byte("dashboard_tls_mode = \"\"\n"), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DashboardTLSMode != TLSModeOff {
+		t.Errorf("DashboardTLSMode = %q, want %q for a hand-edited empty value", cfg.DashboardTLSMode, TLSModeOff)
+	}
+}

@@ -55,6 +55,10 @@ type settingsPageData struct {
 	DashboardAuthEnabled bool
 	DashboardAuthUser    string
 	DashboardAuthSet     bool
+	DashboardHTTPSPort   int
+	DashboardTLSMode     string
+	DashboardTLSCertFile string
+	DashboardTLSKeyFile  string
 	AppName              string
 
 	Saved           bool
@@ -250,6 +254,29 @@ var settingsTmpl = template.Must(template.New("settings").Parse(`
       <div class="hint">0 picks one automatically the first time and remembers it. A port you set is never overwritten: if it can't be bound, the dashboard runs on a temporary port for that session and tray.log says why. On Windows, pick a port below 49152 &mdash; Hyper-V/WSL reserves blocks above that and moves them on every reboot.</div>
     </div>
     <div class="field">
+      <label for="dashboard_tls_mode">HTTPS</label>
+      <select id="dashboard_tls_mode" name="dashboard_tls_mode">
+        <option value="off"{{if eq .DashboardTLSMode "off"}} selected{{end}}>Off &mdash; plain HTTP only</option>
+        <option value="self-signed"{{if eq .DashboardTLSMode "self-signed"}} selected{{end}}>On, generate a certificate for me</option>
+        <option value="files"{{if eq .DashboardTLSMode "files"}} selected{{end}}>On, use my own certificate</option>
+      </select>
+      <div class="hint">A generated certificate is not signed by an authority, so a browser warns once until you trust it. {{.AppName}} logs its SHA-256 fingerprint at startup so you can check it is yours.</div>
+    </div>
+    <div class="field">
+      <label for="dashboard_https_port">HTTPS port</label>
+      <input type="number" id="dashboard_https_port" name="dashboard_https_port" min="0" max="65535" value="{{.DashboardHTTPSPort}}">
+      <div class="hint">Used only when HTTPS is on, and must differ from the port above. 0 picks one automatically the first time and remembers it. HTTP keeps listening either way &mdash; the tray opens it locally.</div>
+    </div>
+    <div class="field">
+      <label for="dashboard_tls_cert_file">Certificate file</label>
+      <input type="text" id="dashboard_tls_cert_file" name="dashboard_tls_cert_file" value="{{.DashboardTLSCertFile}}" placeholder="C:\certs\dashboard.crt">
+      <div class="hint">Only for &ldquo;use my own certificate&rdquo;. Both this and the key are required then, and neither is ever written to.</div>
+    </div>
+    <div class="field">
+      <label for="dashboard_tls_key_file">Key file</label>
+      <input type="text" id="dashboard_tls_key_file" name="dashboard_tls_key_file" value="{{.DashboardTLSKeyFile}}" placeholder="C:\certs\dashboard.key">
+    </div>
+    <div class="field">
       <label><input type="checkbox" id="dashboard_auth_enabled" name="dashboard_auth_enabled" {{if .DashboardAuthEnabled}}checked{{end}} style="width:auto;display:inline-block;vertical-align:middle;margin-right:0.4rem;"> Require a username and password</label>
       <div class="hint">Strongly recommended once the listen address is anything other than 127.0.0.1 -- otherwise anyone on your network can open this dashboard, browse your file list, and pause/cancel uploads.</div>
     </div>
@@ -334,6 +361,10 @@ func renderSettingsPage(db *statedb.DB, cfg config.Config, saved, restartRequire
 
 		DashboardListenAddr:  cfg.DashboardListenAddr,
 		DashboardPort:        cfg.DashboardPort,
+		DashboardHTTPSPort:   cfg.DashboardHTTPSPort,
+		DashboardTLSMode:     cfg.DashboardTLSMode,
+		DashboardTLSCertFile: cfg.DashboardTLSCertFile,
+		DashboardTLSKeyFile:  cfg.DashboardTLSKeyFile,
 		DashboardAuthEnabled: cfg.DashboardAuthEnabled,
 		DashboardAuthUser:    cfg.DashboardAuthUser,
 		DashboardAuthSet:     cfg.DashboardAuthPassHash != "",
@@ -401,6 +432,10 @@ func handleSettingsSave(w http.ResponseWriter, r *http.Request, wc Controller) {
 	// silently doing nothing until the user notices on their own.
 	restartRequired := current.DashboardListenAddr != updated.DashboardListenAddr ||
 		current.DashboardPort != updated.DashboardPort ||
+		current.DashboardHTTPSPort != updated.DashboardHTTPSPort ||
+		current.DashboardTLSMode != updated.DashboardTLSMode ||
+		current.DashboardTLSCertFile != updated.DashboardTLSCertFile ||
+		current.DashboardTLSKeyFile != updated.DashboardTLSKeyFile ||
 		current.DashboardAuthEnabled != updated.DashboardAuthEnabled ||
 		current.DashboardAuthUser != updated.DashboardAuthUser ||
 		current.DashboardAuthPassHash != updated.DashboardAuthPassHash
