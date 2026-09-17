@@ -123,6 +123,43 @@ func loadClientSecret() (*ClientSecret, error) {
 	return &cs, nil
 }
 
+// ParseClientSecretJSON reads the file Google's console hands out when you
+// create an OAuth client. Its credentials are nested under "installed" for
+// a Desktop client, which is the only kind gpsync can use -- the loopback
+// redirect the consent flow relies on is not available to a "web" client.
+//
+// Exported so the CLI's `gpsync setup` and the dashboard's upload share one
+// definition of what a valid credential file is. They had drifted apart
+// once already by virtue of only the CLI having one.
+//
+// Rejects anything without a client_id rather than storing it: a file saved
+// now and found invalid later fails at an unrelated point, typically the
+// first upload, where the real cause is no longer obvious.
+func ParseClientSecretJSON(data []byte) (ClientSecret, error) {
+	var doc struct {
+		Installed struct {
+			ClientID     string `json:"client_id"`
+			ClientSecret string `json:"client_secret"`
+		} `json:"installed"`
+		Web struct {
+			ClientID string `json:"client_id"`
+		} `json:"web"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return ClientSecret{}, fmt.Errorf("that is not a valid client_secret.json: %w", err)
+	}
+	if doc.Installed.ClientID == "" {
+		if doc.Web.ClientID != "" {
+			return ClientSecret{}, fmt.Errorf("that is a Web application OAuth client; gpsync needs one of type Desktop app")
+		}
+		return ClientSecret{}, fmt.Errorf("that does not look like an OAuth Desktop client_secret.json")
+	}
+	return ClientSecret{
+		ClientID:     doc.Installed.ClientID,
+		ClientSecret: doc.Installed.ClientSecret,
+	}, nil
+}
+
 func SaveClientSecret(cs ClientSecret) error {
 	if err := os.MkdirAll(filepath.Dir(ClientSecretPath), 0o700); err != nil {
 		return err
