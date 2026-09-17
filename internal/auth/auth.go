@@ -26,6 +26,7 @@ import (
 	"golang.org/x/oauth2/google"
 	"gopkg.in/ini.v1"
 
+	"github.com/gmizrahi/gpsync/internal/fsperm"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
 
@@ -137,7 +138,7 @@ func SaveClientSecret(cs ClientSecret) error {
 	}
 	// Windows ignores the mode above; keep SECURITY.md's owner-only promise
 	// with an ACL there. No-op on POSIX, where 0600 is already the answer.
-	return restrictToOwner(ClientSecretPath)
+	return fsperm.RestrictToOwner(ClientSecretPath)
 }
 
 func loadToken() *oauth2.Token {
@@ -180,7 +181,7 @@ func saveToken(tok *oauth2.Token) error {
 	}
 	// Applied AFTER the rename: the ACL belongs on the file that survives,
 	// and a rename does not carry the staging file's DACL to the target.
-	return restrictToOwner(TokenPath)
+	return fsperm.RestrictToOwner(TokenPath)
 }
 
 // persistingTokenSource writes the token back to disk whenever the

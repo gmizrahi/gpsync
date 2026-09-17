@@ -230,7 +230,7 @@ func TestSaveToken_NeverLeavesATruncatedFile(t *testing.T) {
 	}
 	// Windows does not implement POSIX mode bits: os.Stat reports 666 there
 	// no matter what os.WriteFile asked for, and owner-only access is
-	// enforced by the ACL restrictToOwner applies instead (perm_windows.go).
+	// enforced by the ACL fsperm.RestrictToOwner applies instead (internal/fsperm).
 	// Asserting 0600 there would be asserting something the platform never
 	// promised; asserting nothing would let a real POSIX regression through.
 	if runtime.GOOS != "windows" {

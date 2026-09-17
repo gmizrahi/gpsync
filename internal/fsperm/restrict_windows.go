@@ -1,6 +1,6 @@
 //go:build windows
 
-package auth
+package fsperm
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// restrictToOwner replaces path's DACL with a single entry granting full
+// RestrictToOwner replaces path's DACL with a single entry granting full
 // access to the current user and nobody else, and detaches it from
 // inheritance.
 //
@@ -20,7 +20,7 @@ import (
 //
 // PROTECTED_DACL_SECURITY_INFORMATION is the part that matters: without it a
 // permissive inherited ACE stays in force alongside the explicit one.
-func restrictToOwner(path string) error {
+func RestrictToOwner(path string) error {
 	token := windows.GetCurrentProcessToken()
 	user, err := token.GetTokenUser()
 	if err != nil {
