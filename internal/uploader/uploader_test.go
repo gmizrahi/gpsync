@@ -3105,10 +3105,13 @@ func TestUploader_Run_SkipSignal_RequestBeforeAnyWaitIsStillHonoredImmediately(t
 
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run() did not return within 2s -- a pre-existing skip request must still cut the first wait short (rung 0 is a real 5s otherwise)")
+	case <-time.After(4 * time.Second):
+		t.Fatal("Run() did not return within 4s -- a pre-existing skip request must still cut the first wait short (rung 0 is a real 5s otherwise)")
 	}
-	if elapsed := time.Since(start); elapsed > 1*time.Second {
+	// 3s, not 1s: the bound only has to sit clearly below the real 5s rung.
+	// A tighter one measures how busy the machine is, and failed at 1.14s on
+	// a Windows runner where this package takes 278s against 18s locally.
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
 		t.Errorf("Run() took %v, want well under the real 5s rung -- the pre-existing skip request should have been honored on the very first wait, not silently missed", elapsed)
 	}
 
@@ -3182,10 +3185,13 @@ func TestUploader_Run_SkipSignal_InterruptsEveryConsecutiveWaitNotJustTheFirst(t
 
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("Run() did not return within 3s -- at least one of the three consecutive skip requests failed to cut its wait short (the real schedule for 3 passes is 5s+30s+1m)")
+	case <-time.After(8 * time.Second):
+		t.Fatal("Run() did not return within 8s -- at least one of the three consecutive skip requests failed to cut its wait short (the real schedule for 3 passes is 5s+30s+1m)")
 	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
+	// Three consecutive waits, each cut short. The real schedule would be
+	// 5s+30s+1m, so 6s still proves every one was interrupted while leaving
+	// room for a slow runner.
+	if elapsed := time.Since(start); elapsed > 6*time.Second {
 		t.Errorf("Run() took %v, want well under the real schedule -- every one of the three waits should have been cut short, not just the first", elapsed)
 	}
 
