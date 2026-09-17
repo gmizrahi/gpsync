@@ -26,8 +26,13 @@ func TestBuildOriginalsReviewItem_AssemblesItemAndCandidates(t *testing.T) {
 	if item.FirstSourcePath != "/lib/2013/originals/IMG_1234.jpg" {
 		t.Errorf("FirstSourcePath = %q, want the originals-folder path", item.FirstSourcePath)
 	}
-	if len(item.Candidates) != 1 || item.Candidates[0].Path != "/lib/2013/IMG_1234.jpg" {
-		t.Errorf("Candidates = %+v, want exactly the edited sibling", item.Candidates)
+	if len(item.Candidates) != 1 {
+		// Fatal, not Error: the next assertion indexes Candidates[0], which
+		// panics on an empty slice and takes the whole package down with it.
+		t.Fatalf("Candidates = %+v, want exactly the edited sibling", item.Candidates)
+	}
+	if item.Candidates[0].Path != filepath.Join(string(filepath.Separator), "lib", "2013", "IMG_1234.jpg") {
+		t.Errorf("Candidates[0].Path = %q, want the edited sibling", item.Candidates[0].Path)
 	}
 	if item.Candidates[0].Status != "pending" {
 		t.Errorf("Candidates[0].Status = %q, want pending", item.Candidates[0].Status)

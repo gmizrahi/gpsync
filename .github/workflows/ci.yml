@@ -12,12 +12,7 @@ jobs:
   test:
     strategy:
       matrix:
-        # windows-latest is temporarily absent: the suite has 12 failures
-        # there, traced to one root cause (path-separator handling in the
-        # ledger's LIKE patterns) plus test-side POSIX assumptions. Tracked
-        # in the issue linked from the README's Contributing section; the
-        # Windows binaries are still built and vetted by cross-build below.
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7

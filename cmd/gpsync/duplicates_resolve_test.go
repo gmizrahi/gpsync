@@ -726,22 +726,25 @@ func TestUnsuffixedPaths_MarkerIsRelativeToTheGroup(t *testing.T) {
 // un-suffixed pin, a multi-folder group only the by-folder pin, so no
 // answer can ever qualify for both.
 func TestPinFromChoice_PicksTheRightStrategy(t *testing.T) {
-	oneFolder := []string{"/d/A.jpg", "/d/A_1.jpg"}
-	twoFolders := []string{"/d1/A.jpg", "/d2/A.jpg"}
+	d := filepath.Join(string(filepath.Separator), "d")
+	d1 := filepath.Join(string(filepath.Separator), "d1")
+	d2 := filepath.Join(string(filepath.Separator), "d2")
+	oneFolder := []string{filepath.Join(d, "A.jpg"), filepath.Join(d, "A_1.jpg")}
+	twoFolders := []string{filepath.Join(d1, "A.jpg"), filepath.Join(d2, "A.jpg")}
 
-	if p := pinFromChoice(oneFolder, "/d/A.jpg", folderSetKey(oneFolder)); p.kind != pinUnsuffixed {
+	if p := pinFromChoice(oneFolder, filepath.Join(d, "A.jpg"), folderSetKey(oneFolder)); p.kind != pinUnsuffixed {
 		t.Errorf("single-folder group produced kind %v, want pinUnsuffixed", p.kind)
 	}
 	// Choosing a SUFFIXED copy states no reusable rule.
-	if p := pinFromChoice(oneFolder, "/d/A_1.jpg", folderSetKey(oneFolder)); p.kind != pinNone {
+	if p := pinFromChoice(oneFolder, filepath.Join(d, "A_1.jpg"), folderSetKey(oneFolder)); p.kind != pinNone {
 		t.Errorf("keeping a _N copy produced kind %v, want pinNone", p.kind)
 	}
-	if p := pinFromChoice(twoFolders, "/d1/A.jpg", folderSetKey(twoFolders)); p.kind != pinFolder || p.folder != "/d1" {
+	if p := pinFromChoice(twoFolders, filepath.Join(d1, "A.jpg"), folderSetKey(twoFolders)); p.kind != pinFolder || p.folder != d1 {
 		t.Errorf("multi-folder group produced %+v, want pinFolder on /d1", p)
 	}
 	// Multi-folder where the kept folder holds two copies: ambiguous, no pin.
-	amb := []string{"/d1/A.jpg", "/d1/A_1.jpg", "/d2/A.jpg"}
-	if p := pinFromChoice(amb, "/d1/A.jpg", folderSetKey(amb)); p.kind != pinNone {
+	amb := []string{filepath.Join(d1, "A.jpg"), filepath.Join(d1, "A_1.jpg"), filepath.Join(d2, "A.jpg")}
+	if p := pinFromChoice(amb, filepath.Join(d1, "A.jpg"), folderSetKey(amb)); p.kind != pinNone {
 		t.Errorf("ambiguous multi-folder group produced kind %v, want pinNone", p.kind)
 	}
 }
