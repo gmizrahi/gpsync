@@ -9,12 +9,17 @@ import (
 // behind the originals-folder review UI: the review item alongside
 // candidate matches found elsewhere in the library by filename, so there
 // is visual confirmation before deciding whether to queue or ignore.
+// libRoot is a host-shaped fixture root: FindByBasename builds its LIKE
+// pattern from filepath.Separator, which cannot match a POSIX literal on
+// Windows.
+var libRoot = filepath.Join(string(filepath.Separator), "lib")
+
 func TestBuildOriginalsReviewItem_AssemblesItemAndCandidates(t *testing.T) {
 	db := openTestDB(t)
-	mustNoErr(t, db.EnsureNeedsReview("h-original", 100, "image/jpeg", "/lib/2013/originals/IMG_1234.jpg", nil))
-	mustNoErr(t, db.UpsertFileSeen("/lib/2013/originals/IMG_1234.jpg", "h-original", 0, 100))
-	mustNoErr(t, db.EnsurePending("h-edited", 90, "image/jpeg", "/lib/2013/IMG_1234.jpg", nil))
-	mustNoErr(t, db.UpsertFileSeen("/lib/2013/IMG_1234.jpg", "h-edited", 0, 90))
+	mustNoErr(t, db.EnsureNeedsReview("h-original", 100, "image/jpeg", filepath.Join(libRoot, "2013", "originals", "IMG_1234.jpg"), nil))
+	mustNoErr(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "originals", "IMG_1234.jpg"), "h-original", 0, 100))
+	mustNoErr(t, db.EnsurePending("h-edited", 90, "image/jpeg", filepath.Join(libRoot, "2013", "IMG_1234.jpg"), nil))
+	mustNoErr(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "IMG_1234.jpg"), "h-edited", 0, 90))
 
 	item, ok, err := BuildOriginalsReviewItem(db, "h-original")
 	if err != nil {
@@ -23,7 +28,7 @@ func TestBuildOriginalsReviewItem_AssemblesItemAndCandidates(t *testing.T) {
 	if !ok {
 		t.Fatal("ok = false, want true for a real needs_review hash")
 	}
-	if item.FirstSourcePath != "/lib/2013/originals/IMG_1234.jpg" {
+	if item.FirstSourcePath != filepath.Join(libRoot, "2013", "originals", "IMG_1234.jpg") {
 		t.Errorf("FirstSourcePath = %q, want the originals-folder path", item.FirstSourcePath)
 	}
 	if len(item.Candidates) != 1 {
@@ -44,7 +49,7 @@ func TestBuildOriginalsReviewItem_AssemblesItemAndCandidates(t *testing.T) {
 // concurrent one) -- must report ok=false, not a stale/empty item.
 func TestBuildOriginalsReviewItem_AlreadyResolved_ReturnsNotOK(t *testing.T) {
 	db := openTestDB(t)
-	mustNoErr(t, db.EnsureNeedsReview("h-original", 100, "image/jpeg", "/lib/originals/a.jpg", nil))
+	mustNoErr(t, db.EnsureNeedsReview("h-original", 100, "image/jpeg", filepath.Join(libRoot, "originals", "a.jpg"), nil))
 	mustNoErr(t, db.ResolveNeedsReview("h-original", false)) // already ignored
 
 	_, ok, err := BuildOriginalsReviewItem(db, "h-original")

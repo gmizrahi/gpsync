@@ -31,7 +31,11 @@ type dashboard struct {
 	inFlight     map[string]*fileTransfer
 	linesDrawn   int
 	lastRedrawAt time.Time
-	batch        *batchTracker // non-nil only for `gpsync sync`'s multi-folder runs -- see batchTracker
+	// redraws counts actual repaints. lastRedrawAt cannot stand in for
+	// this in a test: two repaints inside one clock tick share a timestamp
+	// on a platform with coarse granularity (Windows, ~15.6ms).
+	redraws int
+	batch   *batchTracker // non-nil only for `gpsync sync`'s multi-folder runs -- see batchTracker
 	// backoff is the live circuit-breaker pause state, non-nil only while
 	// the whole pipeline is paused waiting out a throttle. Rendered as a
 	// section of the block rather than a printed line, because it is state
@@ -478,6 +482,7 @@ func (d *dashboard) redraw() {
 		return
 	}
 	d.lastRedrawAt = time.Now()
+	d.redraws++
 	lines := d.blockLines()
 
 	// Move to the top of the previous block (if any) without clearing it
