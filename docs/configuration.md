@@ -34,20 +34,39 @@ password hash.
 | `dashboard_listen_addr` | text | Address the dashboard binds to; non-loopback requires login |
 | `dashboard_port` | number | Dashboard port (0 picks a free one) |
 | `dashboard_auth_enabled` | true/false | Require a username and password for the dashboard |
-| `-` | true/false |  |
 | `dashboard_auth_user` | text | Dashboard username |
 | `dashboard_auth_pass_hash` | text | bcrypt hash of the dashboard password; never the password itself |
+| `dashboard_tls_mode` | text | `off`, `self-signed` or `files` |
+| `dashboard_https_port` | number | HTTPS port when TLS is on (0 picks a free one) |
+| `dashboard_tls_cert_file` | text | Your own certificate, for `files` mode |
+| `dashboard_tls_key_file` | text | Your own private key, for `files` mode |
 
 ## Notes
 
 **`dashboard_listen_addr`** defaults to loopback. gpsync refuses to bind a
 non-loopback address unless `dashboard_auth_enabled` is true, so the dashboard
-cannot be exposed on a network without a login. There is no TLS support yet —
-put it behind a reverse proxy if you need HTTPS.
+cannot be exposed on a network without a login.
 
 **`dashboard_port`** is honoured exactly as written. On Windows, ports above
 49152 can collide with Hyper-V's reserved ranges; pick something lower if the
 dashboard fails to bind.
+
+**`dashboard_tls_mode`** turns HTTPS on. It is off by default, and HTTP keeps
+listening either way — HTTPS is an additional listener on `dashboard_https_port`,
+not a replacement, so the tray and `gpsync tray-quit` keep reaching the dashboard
+over loopback without needing a certificate trusted. The two ports must differ.
+
+`self-signed` generates a certificate once into `~/.gpsync/dashboard_cert.pem`
+and `dashboard_key.pem`, reusing it on every later start; the key is readable
+only by you. Because nothing signed it, a browser warns the first time — gpsync
+logs the certificate's SHA-256 fingerprint at startup so you can confirm the one
+you are being warned about is the one it generated. Trusting it once clears the
+warning for good, and the certificate is only replaced when it is missing,
+unreadable, near expiry, or no longer covers an address you reach it on.
+
+`files` serves a certificate you supply through `dashboard_tls_cert_file` and
+`dashboard_tls_key_file` — from mkcert, a private CA, or a real one. gpsync
+never writes to either. Both are required together.
 
 **Extension lists** take effect on the next scan. Adding an extension to
 `extra_unsupported_extensions` also stops existing queued entries for it from
