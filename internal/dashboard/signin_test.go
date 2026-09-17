@@ -1,8 +1,11 @@
 package dashboard
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -282,5 +285,143 @@ func TestPageShell_TitleCarriesTheVersion(t *testing.T) {
 	// rendering as a trailing space.
 	if version.Version == "" {
 		t.Fatal("version.Version is empty")
+	}
+}
+
+func multipartCredentials(t *testing.T, body string) (string, *bytes.Buffer) {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	f, err := w.CreateFormFile("credentials", "client_secret.json")
+	mustNoErr(t, err)
+	_, err = f.Write([]byte(body))
+	mustNoErr(t, err)
+	mustNoErr(t, w.Close())
+	return w.FormDataContentType(), &buf
+}
+
+func TestSignInUpload_StoresAValidDesktopClient(t *testing.T) {
+	db := openTestDB(t)
+	withScratchCredentials(t)
+
+	srv := newTestServer(t, db, newFakeController(), Options{AppName: "GPhotos Sync"})
+	ct, body := multipartCredentials(t, `{"installed":{"client_id":"abc.apps.googleusercontent.com","client_secret":"shh"}}`)
+	resp, err := newTestClient(t).Post(srv.URL+"/signin/upload", ct, body)
+	mustNoErr(t, err)
+	resp.Body.Close()
+
+	if !auth.HasCredentials() {
+		t.Fatal("credentials were not stored")
+	}
+	id, _ := auth.CurrentClientID()
+	if id != "abc.apps.googleusercontent.com" {
+		t.Errorf("client ID = %q", id)
+	}
+}
+
+// A Web client cannot use the loopback redirect. It must be refused, and
+// the refusal must not leak the secret it contained.
+func TestSignInUpload_RejectsWebClientWithoutLeakingTheSecret(t *testing.T) {
+	db := openTestDB(t)
+	withScratchCredentials(t)
+
+	srv := newTestServer(t, db, newFakeController(), Options{AppName: "GPhotos Sync"})
+	const secret = "leaky-secret-value"
+	ct, body := multipartCredentials(t, `{"web":{"client_id":"abc","client_secret":"`+secret+`"}}`)
+	resp, err := newTestClient(t).Post(srv.URL+"/signin/upload", ct, body)
+	mustNoErr(t, err)
+	loc := resp.Header.Get("Location")
+	resp.Body.Close()
+
+	if auth.HasCredentials() {
+		t.Fatal("a Web client was stored")
+	}
+	decoded, err := url.QueryUnescape(loc)
+	mustNoErr(t, err)
+	if !strings.Contains(decoded, "Web application") {
+		t.Errorf("message = %q, want the Web client named", decoded)
+	}
+	if strings.Contains(decoded, secret) {
+		t.Fatalf("the redirect leaked the client secret: %q", decoded)
+	}
+}
+
+func TestSignInUpload_RejectsOversizedFile(t *testing.T) {
+	db := openTestDB(t)
+	withScratchCredentials(t)
+
+	srv := newTestServer(t, db, newFakeController(), Options{AppName: "GPhotos Sync"})
+	ct, body := multipartCredentials(t, strings.Repeat("x", maxCredentialUpload+1024))
+	resp, err := newTestClient(t).Post(srv.URL+"/signin/upload", ct, body)
+	if err == nil {
+		resp.Body.Close()
+	}
+	if auth.HasCredentials() {
+		t.Fatal("an oversized upload was stored")
+	}
+}
+
+// The consent callback redirects to 127.0.0.1 on this machine, so a flow
+// started from elsewhere can never complete. It must be refused with a
+// reason rather than started and left to die.
+func TestSignInStart_RefusesNonLoopbackRequests(t *testing.T) {
+	withScratchCredentials(t)
+	mustNoErr(t, os.WriteFile(auth.ClientSecretPath,
+		[]byte(`{"client_id":"c.apps.googleusercontent.com","client_secret":"s"}`), 0o600))
+
+	consent := newConsentTracker()
+	req := httptest.NewRequest(http.MethodPost, "/signin/start", nil)
+	req.RemoteAddr = "192.0.2.10:54321" // documentation range: never loopback
+	rec := httptest.NewRecorder()
+
+	handleSignInStart(rec, req, consent)
+
+	loc := rec.Header().Get("Location")
+	decoded, err := url.QueryUnescape(loc)
+	mustNoErr(t, err)
+	if !strings.Contains(decoded, "computer running gpsync") {
+		t.Errorf("message = %q, want it to explain where sign-in must happen", decoded)
+	}
+	if active, _, _, _ := consent.snapshot(); active {
+		t.Error("a consent flow was started for a remote request")
+	}
+}
+
+func TestIsLoopbackRequest(t *testing.T) {
+	for _, tc := range []struct {
+		addr string
+		want bool
+	}{
+		{"127.0.0.1:1234", true},
+		{"[::1]:1234", true},
+		{"192.0.2.10:1234", false},
+		{"10.0.0.5:80", false},
+		{"garbage", false},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/signin/start", nil)
+		req.RemoteAddr = tc.addr
+		if got := isLoopbackRequest(req); got != tc.want {
+			t.Errorf("isLoopbackRequest(%q) = %v, want %v", tc.addr, got, tc.want)
+		}
+	}
+}
+
+func TestSignInStatus_ReportsIdleState(t *testing.T) {
+	db := openTestDB(t)
+	withScratchCredentials(t)
+
+	srv := newTestServer(t, db, newFakeController(), Options{AppName: "GPhotos Sync"})
+	resp, err := newTestClient(t).Get(srv.URL + "/signin/status")
+	mustNoErr(t, err)
+	defer resp.Body.Close()
+
+	var s struct {
+		Active   bool `json:"active"`
+		Done     bool `json:"done"`
+		SignedIn bool `json:"signed_in"`
+	}
+	mustNoErr(t, json.NewDecoder(resp.Body).Decode(&s))
+	if s.Active || s.Done || s.SignedIn {
+		t.Errorf("idle status = %+v, want all false", s)
 	}
 }

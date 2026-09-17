@@ -12,25 +12,17 @@ import (
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
 
-// The sign-in page exists because gpsync-tray could not authenticate at all:
-// the Account card reported whether credentials existed, but getting them
-// there needed `gpsync setup` or `gpsync import-rclone` from a terminal. For
-// someone who installs the tray and never opens a shell, that is a hard
-// block -- the app runs and can do nothing.
+// The sign-in page exists because gpsync-tray could not authenticate at
+// all: the Account card reported whether credentials existed, but getting
+// them there needed `gpsync setup` or `gpsync import-rclone` from a
+// terminal, so a tray-only user was hard blocked.
 //
-// This is the rclone half. It reads an existing rclone config and imports a
-// Google Photos remote's credentials, which for anyone arriving from rclone
-// skips Google's console entirely. Every piece of it already existed in
-// internal/auth and was reachable only from the CLI.
+// Three ways in: import an existing rclone remote (a local file read, so it
+// works from any device), upload a client_secret.json, and run Google's
+// consent flow. The consent flow is loopback-only -- see consent.go.
 //
-// Deliberately NOT a GCP wizard: creating an OAuth consent screen and a
-// Desktop client has no API, so a human must click through the console
-// regardless, and wrapping manual steps in more UI removes none of them.
-// docs/setup.md is linked instead.
-//
-// Note there is no consent flow here, which matters for where this can be
-// used from: importing is a local file read, so unlike the browser-based
-// flow it works just as well when the dashboard is open on another device.
+// Not a GCP wizard: creating an OAuth client has no API, so a human clicks
+// through Google's console either way. docs/setup.md is linked instead.
 
 type signInPageData struct {
 	AppName string
@@ -43,6 +35,10 @@ type signInPageData struct {
 
 	Message      string
 	ErrorMessage string
+
+	// Local is false when the request came from another device, where the
+	// consent flow cannot complete (Google redirects to 127.0.0.1 here).
+	Local bool
 }
 
 var signInTmpl = template.Must(template.New("signin").Parse(`
@@ -84,19 +80,66 @@ var signInTmpl = template.Must(template.New("signin").Parse(`
 <div class="card">
   <h2>Set up from scratch</h2>
   <div class="hint">
-    Google has no API for creating an OAuth client, so this part is done once in their console by hand.
-    Follow <a href="https://github.com/gmizrahi/gpsync/blob/main/docs/setup.md">the setup guide</a>, then run
-    <code>gpsync setup</code> once from a terminal on this computer.
+    Google has no API for creating an OAuth client, so that part is done once in their console by hand:
+    follow <a href="https://github.com/gmizrahi/gpsync/blob/main/docs/setup.md">the setup guide</a> to create an
+    OAuth client of type <strong>Desktop app</strong>, then upload the file it gives you.
   </div>
+  <form method="post" action="/signin/upload" enctype="multipart/form-data">
+    <div class="field">
+      <label for="credentials">client_secret.json</label>
+      <input type="file" id="credentials" name="credentials" accept=".json,application/json">
+    </div>
+    <button type="submit">Upload</button>
+  </form>
 </div>
+
+{{if .Account.HasCredentials}}
+<div class="card">
+  <h2>Sign in with Google</h2>
+  {{if .Account.HasToken}}
+    <div class="hint">Already signed in. Signing in again replaces the stored token.</div>
+  {{end}}
+  {{if not .Local}}
+    <div class="hint">This has to be done on the computer running {{.AppName}}: Google sends the browser back to
+      that machine, so it cannot be completed from another device.</div>
+  {{else}}
+    <div class="hint">Opens Google's consent screen in your browser. {{.AppName}} waits up to five minutes.</div>
+    <form method="post" action="/signin/start">
+      <button type="submit">Sign in with Google</button>
+    </form>
+  {{end}}
+  <div class="row"><span class="label">Status</span><span id="consent-status">—</span></div>
+</div>
+<script>
+(function(){
+  var el = document.getElementById('consent-status');
+  if (!el) return;
+  function tick(){
+    fetch('/signin/status', {credentials:'same-origin'}).then(function(r){return r.json();}).then(function(s){
+      if (s.error) { el.textContent = s.error; return; }
+      if (s.active) {
+        el.textContent = 'waiting for Google…';
+        if (s.url) { el.innerHTML = 'waiting for Google… <a href="' + s.url + '" rel="noopener">open the consent page</a>'; }
+        setTimeout(tick, 2000);
+        return;
+      }
+      el.textContent = s.signed_in ? 'signed in' : (s.done ? 'not completed' : '—');
+      if (s.done && s.signed_in) { setTimeout(function(){ location.reload(); }, 1000); }
+    }).catch(function(){ setTimeout(tick, 5000); });
+  }
+  tick();
+})();
+</script>
+{{end}}
 `))
 
-func renderSignInPage(db *statedb.DB, cfg config.Config, appName, msg, errMsg string) (string, error) {
+func renderSignInPage(db *statedb.DB, cfg config.Config, appName, msg, errMsg string, local bool) (string, error) {
 	data := signInPageData{
 		AppName:      appName,
 		Account:      accountStatus(),
 		Message:      msg,
 		ErrorMessage: errMsg,
+		Local:        local,
 	}
 
 	if path, ok := auth.FindRcloneConf(); ok {
