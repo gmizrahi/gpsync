@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,9 +42,9 @@ func TestProbe_RawEventNames(t *testing.T) {
 				if !ok {
 					return
 				}
-				t.Logf("PROBE goos=%s op=%-14s name=%q dir=%q", runtime.GOOS, ev.Op.String(), ev.Name, filepath.Dir(ev.Name))
+				fmt.Printf("PROBE goos=%s op=%-14s name=%q dir=%q\n", runtime.GOOS, ev.Op.String(), ev.Name, filepath.Dir(ev.Name))
 			case err := <-fsw.Errors:
-				t.Logf("PROBE error: %v", err)
+				fmt.Printf("PROBE error: %v\n", err)
 			case <-deadline:
 				return
 			}
@@ -55,5 +56,5 @@ func TestProbe_RawEventNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-done
-	t.Logf("PROBE expected leaf = %q", sub)
+	fmt.Printf("PROBE expected leaf = %q\n", sub)
 }
