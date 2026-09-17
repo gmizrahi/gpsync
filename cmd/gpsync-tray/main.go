@@ -1,9 +1,9 @@
 //go:build windows
 
-// Command gpsync-tray ("gpsync" in its own UI) is a Windows systray
+// Command gpsync-tray ("GPhotos Sync" in its own UI) is a Windows systray
 // wrapper around the same watch engine `gpsync watch` uses (internal/engine,
 // internal/watcher) -- runs in-process, no shelling out to gpsync.exe. Only
-// the app-facing branding says "gpsync"; the CLI binary/commands
+// the app-facing branding says "GPhotos Sync"; the CLI binary/commands
 // stay `gpsync`/`gpsync.exe`/`gpsync-tray.exe` throughout. A visual
 // duplicate-resolution mode remains a fast-follow, not built here.
 package main
@@ -28,7 +28,7 @@ import (
 
 // appName is the app-facing display name -- tray tooltip, dashboard
 // title/header, favicon alt text. Never the CLI binary/command name.
-const appName = "gpsync"
+const appName = "GPhotos Sync"
 
 func main() {
 	// Without this, `gpsync-tray.exe --help` printed nothing at all.

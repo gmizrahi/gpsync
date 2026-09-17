@@ -119,7 +119,7 @@ func dashboardCmd() *cobra.Command {
 				return fmt.Errorf("dashboard TLS: %w", err)
 			}
 
-			handler := webdashboard.Handler(db, ctrl, webdashboard.Options{AppName: "gpsync"})
+			handler := webdashboard.Handler(db, ctrl, webdashboard.Options{AppName: "GPhotos Sync"})
 			// Header/idle timeouts bound a stalled or slow-loris client.
 			// WriteTimeout stays unset on purpose: the dashboard serves
 			// full-resolution originals, and a large video download must

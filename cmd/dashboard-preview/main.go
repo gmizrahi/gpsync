@@ -163,7 +163,7 @@ func main() {
 			`<script>document.getElementById('v').textContent=innerWidth+'x'+innerHeight+' dpr '+devicePixelRatio`+
 			`+' '+(matchMedia('(max-width: 600px)').matches?'phone-mq':'wide-mq')</script></body></html>`)
 	})
-	mux.Handle("/", dashboard.Handler(db, ctrl, dashboard.Options{AppName: "gpsync"}))
+	mux.Handle("/", dashboard.Handler(db, ctrl, dashboard.Options{AppName: "GPhotos Sync"}))
 
 	fmt.Printf("dashboard preview on http://%s (ledger: %s)\n", *addr, statedb.StateDBPath)
 	srv := &http.Server{
