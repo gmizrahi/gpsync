@@ -52,7 +52,8 @@ gpsync setup           # asks for the path to the downloaded JSON
 ```
 
 A browser opens for consent, and the token is stored in `~/.gpsync/token.json`
-with owner-only permissions.
+restricted to your user account: mode 0600 on Linux and macOS, and an
+owner-only ACL on Windows, which has no equivalent mode bits.
 
 ## Checking it worked
 

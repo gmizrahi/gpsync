@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -227,8 +228,15 @@ func TestSaveToken_NeverLeavesATruncatedFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("token.json mode = %o, want 600 -- the atomic rename must not loosen the documented credential permissions", perm)
+	// Windows does not implement POSIX mode bits: os.Stat reports 666 there
+	// no matter what os.WriteFile asked for, and owner-only access is
+	// enforced by the ACL restrictToOwner applies instead (perm_windows.go).
+	// Asserting 0600 there would be asserting something the platform never
+	// promised; asserting nothing would let a real POSIX regression through.
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("token.json mode = %o, want 600 -- the atomic rename must not loosen the documented credential permissions", perm)
+		}
 	}
 }
 

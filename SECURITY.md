@@ -13,8 +13,11 @@ Include what you did, what happened, and the gpsync version (`gpsync --version`)
 gpsync runs locally and stores everything in `~/.gpsync`. The assets worth
 protecting are your Google OAuth credentials and the local dashboard.
 
-**Credentials.** `client_secret.json` and `token.json` are written with
-owner-only permissions (0600) in a 0700 directory. They are never logged. The
+**Credentials.** `client_secret.json` and `token.json` are restricted to
+your user account. On Linux and macOS that is mode 0600 inside a 0700
+directory; Windows does not implement those mode bits, so gpsync applies an
+ACL granting access to the owning account alone and blocking inherited
+permissions. They are never logged. The
 OAuth scope requested is `photoslibrary.appendonly`: uploads only, so a stolen
 token cannot read, alter or delete your existing library. Revoke access at
 <https://myaccount.google.com/permissions>. Note that `gpsync backup` archives

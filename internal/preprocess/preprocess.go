@@ -101,6 +101,13 @@ func PrepareUploadPath(path string, cfg config.Config) (string, func()) {
 		remove()
 		return path, noCleanup
 	}
+	// imaging decodes to a raw image and re-encodes, carrying no metadata
+	// across, so the EXIF has to be put back deliberately. Without this step
+	// every downscaled photo reaches Google with none -- and since
+	// batchCreate has no date field, Google falls back to the upload time
+	// and the photo shows the wrong "date taken". carryEXIF also normalises
+	// Orientation, because imaging.Open has already rotated the pixels.
+	carryEXIF(path, outPath)
 	return outPath, remove
 }
 
