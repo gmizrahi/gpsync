@@ -160,6 +160,57 @@ type Config struct {
 	// ApplySettingsForm): submitting it blank means "keep the existing
 	// hash", never derived from what's already stored.
 	DashboardAuthPassHash string `toml:"dashboard_auth_pass_hash"`
+
+	// DashboardTLSMode selects where the dashboard's certificate comes
+	// from, or TLSModeOff to serve plain HTTP. Deliberately one field
+	// rather than a separate enabled/mode pair: two switches would allow
+	// the nonsensical "enabled, but mode off", and a setting that encodes
+	// one fact in two places drifts.
+	//
+	// Off by default. v0.1.0 shipped plain HTTP, so turning TLS on by
+	// itself would change the scheme under anyone holding a saved http://
+	// bookmark. Like the fields above, it takes effect on the next restart.
+	DashboardTLSMode string `toml:"dashboard_tls_mode"`
+	// DashboardTLSCertFile/DashboardTLSKeyFile are a certificate and key
+	// the user manages -- mkcert, a home CA, or a real CA. Read in
+	// TLSModeFiles and never written to: regenerating over a key gpsync
+	// did not create would destroy it.
+	DashboardTLSCertFile string `toml:"dashboard_tls_cert_file"`
+	DashboardTLSKeyFile  string `toml:"dashboard_tls_key_file"`
+	// DashboardTLSDomain is the public hostname for TLSModeAcme, e.g.
+	// "dashboard.example.com". It must resolve to this machine from the
+	// internet, or the ACME challenge cannot complete.
+	//
+	// Reaching that point means the dashboard is exposed to the internet
+	// rather than just the LAN, which is a materially larger step: it
+	// edits settings, browses the whole library, moves files resolving
+	// duplicates, and runs backup/restore. TLSModeAcme therefore requires
+	// DashboardAuthEnabled, on the same reasoning as BindNeedsAuth.
+	DashboardTLSDomain string `toml:"dashboard_tls_domain"`
+}
+
+// The DashboardTLSMode values. TLSModeSelfSigned generates and manages a
+// certificate under ~/.gpsync and is the only mode that needs no domain at
+// all, which is why it suits the default deployment on loopback or a LAN
+// address; TLSModeAcme is for a machine genuinely reachable by hostname
+// from the internet.
+const (
+	TLSModeOff        = "off"
+	TLSModeSelfSigned = "self-signed"
+	TLSModeFiles      = "files"
+	TLSModeAcme       = "acme"
+)
+
+// TLSModeValid reports whether mode is one gpsync understands. Exported so
+// engine.ApplySettingsForm can reject exactly what Load would otherwise
+// have to correct -- the same reason BindNeedsAuth is exported, and the
+// same drift it exists to prevent.
+func TLSModeValid(mode string) bool {
+	switch mode {
+	case TLSModeOff, TLSModeSelfSigned, TLSModeFiles, TLSModeAcme:
+		return true
+	}
+	return false
 }
 
 const (
@@ -208,6 +259,7 @@ func Defaults() Config {
 		DashboardListenAddr:           DashboardListenLocal,
 		DashboardPort:                 0,
 		DashboardAuthEnabled:          false,
+		DashboardTLSMode:              TLSModeOff,
 	}
 }
 
@@ -270,6 +322,22 @@ func Load() (Config, error) {
 	if BindNeedsAuth(cfg.DashboardListenAddr) && !cfg.DashboardAuthEnabled {
 		cfg.DashboardListenAddr = DashboardListenLocal
 		cfg.DashboardBindGuarded = true
+	}
+	// A config.toml predating this field is already handled: the key is
+	// absent, so toml.Unmarshal leaves Defaults()' "off" in place.
+	//
+	// This covers the case that is NOT handled that way -- a hand-edited
+	// `dashboard_tls_mode = ""`, where the key IS present, so Unmarshal
+	// overwrites the default with an empty string. Hand-editing config.toml
+	// is a supported path (the same reason the watch-interval clamp above
+	// exists), and an empty value plainly means "not configured".
+	//
+	// An UNRECOGNISED value is deliberately left alone rather than
+	// normalised to "off": serving plain HTTP to someone who believes they
+	// turned TLS on is the worst outcome available, so the server reports
+	// it rather than silently continuing.
+	if strings.TrimSpace(cfg.DashboardTLSMode) == "" {
+		cfg.DashboardTLSMode = TLSModeOff
 	}
 	return cfg, nil
 }

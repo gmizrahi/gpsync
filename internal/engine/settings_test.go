@@ -339,3 +339,91 @@ func TestApplySettingsForm_PublicBindWithoutAuth_IsRejected(t *testing.T) {
 		t.Errorf("loopback without auth must be allowed: %v", err)
 	}
 }
+
+// The form omits every TLS key today, which is exactly what an older
+// browser-cached page submits. That must mean "off", not an error.
+func TestApplySettingsForm_NoTLSFields_MeansOff(t *testing.T) {
+	got, err := ApplySettingsForm(config.Defaults(), validSettingsForm())
+	if err != nil {
+		t.Fatalf("ApplySettingsForm error = %v, want nil", err)
+	}
+	if got.DashboardTLSMode != config.TLSModeOff {
+		t.Errorf("DashboardTLSMode = %q, want %q when the form carries no TLS fields", got.DashboardTLSMode, config.TLSModeOff)
+	}
+}
+
+// A typo must be named. Accepting it and serving plain HTTP would leave
+// someone believing the dashboard was encrypted when it was not.
+func TestApplySettingsForm_UnknownTLSMode_IsRejected(t *testing.T) {
+	form := validSettingsForm()
+	form.Set("dashboard_tls_mode", "selfsigned")
+
+	current := config.Defaults()
+	got, err := ApplySettingsForm(current, form)
+	if err == nil {
+		t.Fatal("err = nil, want a refusal naming the valid modes")
+	}
+	if got.DashboardTLSMode != current.DashboardTLSMode {
+		t.Error("a rejected submission still altered the config")
+	}
+}
+
+// Half a pair cannot work: gpsync would have to invent the missing half,
+// and every handshake would fail looking like a corrupt file.
+func TestApplySettingsForm_FilesModeNeedsBothPaths(t *testing.T) {
+	for _, tc := range []struct{ name, cert, key string }{
+		{"cert without key", "C:\\certs\\gpsync.crt", ""},
+		{"key without cert", "", "C:\\certs\\gpsync.key"},
+		{"neither", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			form := validSettingsForm()
+			form.Set("dashboard_tls_mode", config.TLSModeFiles)
+			form.Set("dashboard_tls_cert_file", tc.cert)
+			form.Set("dashboard_tls_key_file", tc.key)
+
+			if _, err := ApplySettingsForm(config.Defaults(), form); err == nil {
+				t.Fatal("err = nil, want a refusal for an incomplete pair")
+			}
+		})
+	}
+}
+
+func TestApplySettingsForm_AcmeNeedsADomain(t *testing.T) {
+	form := validSettingsForm()
+	form.Set("dashboard_tls_mode", config.TLSModeAcme)
+	form.Set("dashboard_tls_domain", "")
+
+	if _, err := ApplySettingsForm(config.Defaults(), form); err == nil {
+		t.Fatal("err = nil, want a refusal: ACME cannot issue for no hostname")
+	}
+}
+
+// ACME means the dashboard is reachable from the internet, not just the
+// LAN. That surface edits settings, browses the library, moves files and
+// runs backup/restore, so a login is not optional -- the same rule the
+// listen-address check applies, at a larger scale.
+func TestApplySettingsForm_AcmeWithoutAuth_IsRejected(t *testing.T) {
+	form := validSettingsForm()
+	form.Set("dashboard_tls_mode", config.TLSModeAcme)
+	form.Set("dashboard_tls_domain", "dashboard.example.com")
+	form.Del("dashboard_auth_enabled")
+
+	if _, err := ApplySettingsForm(config.Defaults(), form); err == nil {
+		t.Fatal("err = nil, want a refusal: an internet-reachable dashboard requires auth")
+	}
+}
+
+func TestApplySettingsForm_AcmeWithDomainAndAuth_IsAccepted(t *testing.T) {
+	form := validSettingsForm()
+	form.Set("dashboard_tls_mode", config.TLSModeAcme)
+	form.Set("dashboard_tls_domain", "dashboard.example.com")
+
+	got, err := ApplySettingsForm(config.Defaults(), form)
+	if err != nil {
+		t.Fatalf("ApplySettingsForm error = %v, want nil", err)
+	}
+	if got.DashboardTLSMode != config.TLSModeAcme || got.DashboardTLSDomain != "dashboard.example.com" {
+		t.Errorf("mode/domain = %q/%q, want acme/dashboard.example.com", got.DashboardTLSMode, got.DashboardTLSDomain)
+	}
+}
