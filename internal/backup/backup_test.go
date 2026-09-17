@@ -244,18 +244,28 @@ func TestCreate_FailedWriteLeavesNoArchiveForPruneToMistakeForAGoodOne(t *testin
 		t.Fatal(err)
 	}
 
-	// Break the source directory so the next Create fails partway.
-	stateDir := statedb.StateDir
-	missing := stateDir + "-moved-away"
-	if err := os.Rename(stateDir, missing); err != nil {
+	// Make the next Create fail PARTWAY -- after it has already created the
+	// destination file, which is the state this test is about. writeZip
+	// opens every entry in the state directory (addFileToZip), so an entry
+	// it cannot open is enough.
+	//
+	// Deliberately not done by renaming the state directory: the SQLite
+	// handle is still open, and Windows refuses to rename a directory that
+	// has an open file in it ("Access is denied"). Closing the handle first
+	// would make Create fail earlier, at BackupTo, so the test would pass
+	// for the wrong reason.
+	blocker := filepath.Join(statedb.StateDir, "unreadable.bin")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	restore := denyRead(t, blocker)
 
 	if _, err := Create(db, destDir, 2); err == nil {
-		t.Fatal("expected Create to fail once its source directory is gone")
+		t.Fatal("expected Create to fail once an entry in its source directory cannot be read")
 	}
 
-	if err := os.Rename(missing, stateDir); err != nil {
+	restore()
+	if err := os.Remove(blocker); err != nil {
 		t.Fatal(err)
 	}
 

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gmizrahi/gpsync/internal/fsperm"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 	"github.com/gmizrahi/gpsync/internal/units"
 )
@@ -106,11 +107,19 @@ func backupFileName(t time.Time) string {
 // file directly inside statedb.StateDir -- config.toml, client_secret.json,
 // token.json, and anything else gpsync keeps there now or in the future.
 func writeZip(destPath, dbSnapshotPath string) ([]string, error) {
-	zf, err := os.Create(destPath)
+	// filePerm, not os.Create's 0666&umask: this archive contains
+	// client_secret.json and token.json (see this function's doc comment
+	// above), and it is usually written somewhere synced.
+	zf, err := os.OpenFile(destPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, filePerm)
 	if err != nil {
 		return nil, err
 	}
 	defer zf.Close()
+	// Windows ignores the mode above; keep the same guarantee there with an
+	// ACL. No-op on POSIX.
+	if err := fsperm.RestrictToOwner(destPath); err != nil {
+		return nil, err
+	}
 	zw := zip.NewWriter(zf)
 
 	if err := addFileToZip(zw, dbSnapshotPath, stateFileName); err != nil {

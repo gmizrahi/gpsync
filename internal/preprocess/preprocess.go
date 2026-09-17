@@ -16,8 +16,15 @@ import (
 	"github.com/gmizrahi/gpsync/internal/extensions"
 )
 
+// TIFF is deliberately absent. Downscaling it would mean decoding it, and
+// the decoder (golang.org/x/image/tiff, via imaging) has a known crash on
+// crafted TIFFs with no fixed version available. TIFF is a lossless format,
+// so uploading the original is the better outcome anyway -- and leaving it
+// out means gpsync never hands a TIFF to that decoder at all, which makes
+// the advisory unreachable rather than merely unlikely. See
+// docs/limitations.md.
 var resizableExts = map[string]bool{
-	"jpg": true, "jpeg": true, "png": true, "webp": true, "tiff": true, "tif": true,
+	"jpg": true, "jpeg": true, "png": true, "webp": true,
 }
 
 // IsResizable reports whether imaging.Open can actually decode this file --
@@ -101,6 +108,13 @@ func PrepareUploadPath(path string, cfg config.Config) (string, func()) {
 		remove()
 		return path, noCleanup
 	}
+	// imaging decodes to a raw image and re-encodes, carrying no metadata
+	// across, so the EXIF has to be put back deliberately. Without this step
+	// every downscaled photo reaches Google with none -- and since
+	// batchCreate has no date field, Google falls back to the upload time
+	// and the photo shows the wrong "date taken". carryEXIF also normalises
+	// Orientation, because imaging.Open has already rotated the pixels.
+	carryEXIF(path, outPath)
 	return outPath, remove
 }
 

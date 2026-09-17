@@ -14,6 +14,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// libRoot and photoRoot are host-shaped fixture roots. A LIKE pattern
+// built from filepath.Separator can only match rows written with that
+// same separator, so POSIX literals here found nothing on Windows.
+var (
+	libRoot   = filepath.Join(string(filepath.Separator), "lib")
+	photoRoot = filepath.Join(string(filepath.Separator), "photos")
+)
+
 func openTestDB(t *testing.T) *DB {
 	t.Helper()
 	t.Setenv("GPSYNC_STATE_DIR", t.TempDir())
@@ -298,10 +306,10 @@ func TestNeedsReviewItems_ReturnsOnlyNeedsReviewSortedByPath(t *testing.T) {
 // looked for across the whole library.
 func TestFindByBasename_MatchesExcludesSelfCaseInsensitive(t *testing.T) {
 	db := openTestDB(t)
-	must(t, db.UpsertFileSeen("/lib/2013/originals/IMG_1234.jpg", "h-original", 0, 100))
-	must(t, db.UpsertFileSeen("/lib/2013/IMG_1234.JPG", "h-edited", 0, 90)) // same name, different case, different hash
-	must(t, db.UpsertFileSeen("/lib/2014/IMG_1234.jpg", "h-unrelated", 0, 80))
-	must(t, db.UpsertFileSeen("/lib/2013/other.jpg", "h-other", 0, 70))
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "originals", "IMG_1234.jpg"), "h-original", 0, 100))
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "IMG_1234.JPG"), "h-edited", 0, 90)) // same name, different case, different hash
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2014", "IMG_1234.jpg"), "h-unrelated", 0, 80))
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "other.jpg"), "h-other", 0, 70))
 
 	matches, err := db.FindByBasename("IMG_1234.jpg", "h-original")
 	if err != nil {
@@ -391,15 +399,15 @@ func TestFindByBasename_WindowsPath_UnderscoreBasenameNoFalsePositive(t *testing
 // this exact rather than approximate.
 func TestOriginalsFolderRowsPendingOrFailed_PreFiltersByOriginalsPathSegment(t *testing.T) {
 	db := openTestDB(t)
-	must(t, db.EnsurePending("h-orig", 100, "image/jpeg", "/lib/2013/originals/a.jpg", nil))
-	must(t, db.UpsertFileSeen("/lib/2013/originals/a.jpg", "h-orig", 0, 100))
+	must(t, db.EnsurePending("h-orig", 100, "image/jpeg", filepath.Join(libRoot, "2013", "originals", "a.jpg"), nil))
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "originals", "a.jpg"), "h-orig", 0, 100))
 	must(t, db.MarkFailed("h-orig", false, "SOME_ERROR", "transient"))
 
-	must(t, db.EnsurePending("h-plain", 100, "image/jpeg", "/lib/2013/b.jpg", nil))
-	must(t, db.UpsertFileSeen("/lib/2013/b.jpg", "h-plain", 0, 100))
+	must(t, db.EnsurePending("h-plain", 100, "image/jpeg", filepath.Join(libRoot, "2013", "b.jpg"), nil))
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "b.jpg"), "h-plain", 0, 100))
 
-	must(t, db.EnsurePending("h-done", 100, "image/jpeg", "/lib/2013/originals/c.jpg", nil))
-	must(t, db.UpsertFileSeen("/lib/2013/originals/c.jpg", "h-done", 0, 100))
+	must(t, db.EnsurePending("h-done", 100, "image/jpeg", filepath.Join(libRoot, "2013", "originals", "c.jpg"), nil))
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "originals", "c.jpg"), "h-done", 0, 100))
 	must(t, db.MarkUploaded("h-done", "media-1", "")) // already uploaded -- must not appear
 
 	items, err := db.OriginalsFolderRowsPendingOrFailed()
@@ -418,17 +426,17 @@ func TestOriginalsFolderRowsPendingOrFailed_PreFiltersByOriginalsPathSegment(t *
 // something for the user to go find and clean up manually.
 func TestOriginalsFolderRowsUploaded_FindsAlreadyUploadedOriginalsFiles(t *testing.T) {
 	db := openTestDB(t)
-	must(t, db.EnsurePending("h-uploaded-orig", 100, "image/jpeg", "/lib/2013/originals/a.jpg", nil))
-	must(t, db.UpsertFileSeen("/lib/2013/originals/a.jpg", "h-uploaded-orig", 0, 100))
+	must(t, db.EnsurePending("h-uploaded-orig", 100, "image/jpeg", filepath.Join(libRoot, "2013", "originals", "a.jpg"), nil))
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "originals", "a.jpg"), "h-uploaded-orig", 0, 100))
 	must(t, db.MarkUploaded("h-uploaded-orig", "media-item-1", ""))
 
 	// A pending (not yet uploaded) originals-folder file -- must not appear.
-	must(t, db.EnsurePending("h-pending-orig", 100, "image/jpeg", "/lib/2013/originals/b.jpg", nil))
-	must(t, db.UpsertFileSeen("/lib/2013/originals/b.jpg", "h-pending-orig", 0, 100))
+	must(t, db.EnsurePending("h-pending-orig", 100, "image/jpeg", filepath.Join(libRoot, "2013", "originals", "b.jpg"), nil))
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "originals", "b.jpg"), "h-pending-orig", 0, 100))
 
 	// An uploaded file NOT in an originals folder -- must not appear.
-	must(t, db.EnsurePending("h-uploaded-plain", 100, "image/jpeg", "/lib/2013/c.jpg", nil))
-	must(t, db.UpsertFileSeen("/lib/2013/c.jpg", "h-uploaded-plain", 0, 100))
+	must(t, db.EnsurePending("h-uploaded-plain", 100, "image/jpeg", filepath.Join(libRoot, "2013", "c.jpg"), nil))
+	must(t, db.UpsertFileSeen(filepath.Join(libRoot, "2013", "c.jpg"), "h-uploaded-plain", 0, 100))
 	must(t, db.MarkUploaded("h-uploaded-plain", "media-item-2", ""))
 
 	rows, err := db.OriginalsFolderRowsUploaded()
@@ -774,18 +782,18 @@ func TestLastUploadAt_IgnoresMarkSyncedAndReportsNeverUploaded(t *testing.T) {
 
 func TestResetStatusUnder_ResetsUploadedAndFailedBackToPending(t *testing.T) {
 	db := openTestDB(t)
-	must(t, db.EnsurePending("h1", 1, "image/jpeg", "/mnt/c/Photos/2024/a.jpg", nil))
+	must(t, db.EnsurePending("h1", 1, "image/jpeg", filepath.Join(photoRoot, "2024", "a.jpg"), nil))
 	must(t, db.MarkUploaded("h1", "media-1", ""))
-	must(t, db.EnsurePending("h2", 1, "image/jpeg", "/mnt/c/Photos/2024/b.jpg", nil))
+	must(t, db.EnsurePending("h2", 1, "image/jpeg", filepath.Join(photoRoot, "2024", "b.jpg"), nil))
 	must(t, db.MarkFailed("h2", true, "INVALID_ARGUMENT", "bad file"))
-	must(t, db.UpsertFileSeen("/mnt/c/Photos/2024/a.jpg", "h1", 0, 1))
-	must(t, db.UpsertFileSeen("/mnt/c/Photos/2024/b.jpg", "h2", 0, 1))
+	must(t, db.UpsertFileSeen(filepath.Join(photoRoot, "2024", "a.jpg"), "h1", 0, 1))
+	must(t, db.UpsertFileSeen(filepath.Join(photoRoot, "2024", "b.jpg"), "h2", 0, 1))
 	// A file outside the reset scope must be untouched.
-	must(t, db.EnsurePending("h3", 1, "image/jpeg", "/mnt/c/Photos/2023/c.jpg", nil))
+	must(t, db.EnsurePending("h3", 1, "image/jpeg", filepath.Join(photoRoot, "2023", "c.jpg"), nil))
 	must(t, db.MarkUploaded("h3", "media-3", ""))
-	must(t, db.UpsertFileSeen("/mnt/c/Photos/2023/c.jpg", "h3", 0, 1))
+	must(t, db.UpsertFileSeen(filepath.Join(photoRoot, "2023", "c.jpg"), "h3", 0, 1))
 
-	n, err := db.ResetStatusUnder([]string{"/mnt/c/Photos/2024"})
+	n, err := db.ResetStatusUnder([]string{filepath.Join(photoRoot, "2024")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1056,28 +1064,28 @@ func TestLedgerSummary_DistinguishesUploadedFromMarkedSynced(t *testing.T) {
 	db := openTestDB(t)
 
 	// A real upload: EnsurePending then MarkUploaded with a real media item id.
-	must(t, db.EnsurePending("h-real", 1000, "image/jpeg", "/mnt/c/Photos/2024/a.jpg", nil))
+	must(t, db.EnsurePending("h-real", 1000, "image/jpeg", filepath.Join(photoRoot, "2024", "a.jpg"), nil))
 	must(t, db.MarkUploaded("h-real", "media-item-123", ""))
-	must(t, db.UpsertFileSeen("/mnt/c/Photos/2024/a.jpg", "h-real", 0, 1000))
+	must(t, db.UpsertFileSeen(filepath.Join(photoRoot, "2024", "a.jpg"), "h-real", 0, 1000))
 
 	// A mark-synced snapshot: no network call, no media item id.
-	must(t, db.EnsureMarkedSynced("h-marked", 2000, "image/jpeg", "/mnt/c/Photos/2023/b.jpg", nil))
-	must(t, db.UpsertFileSeen("/mnt/c/Photos/2023/b.jpg", "h-marked", 0, 2000))
+	must(t, db.EnsureMarkedSynced("h-marked", 2000, "image/jpeg", filepath.Join(photoRoot, "2023", "b.jpg"), nil))
+	must(t, db.UpsertFileSeen(filepath.Join(photoRoot, "2023", "b.jpg"), "h-marked", 0, 2000))
 
 	// A still-pending file, and one of each failure kind.
-	must(t, db.EnsurePending("h-pending", 500, "image/jpeg", "/mnt/c/Photos/2024/c.jpg", nil))
-	must(t, db.UpsertFileSeen("/mnt/c/Photos/2024/c.jpg", "h-pending", 0, 500))
+	must(t, db.EnsurePending("h-pending", 500, "image/jpeg", filepath.Join(photoRoot, "2024", "c.jpg"), nil))
+	must(t, db.UpsertFileSeen(filepath.Join(photoRoot, "2024", "c.jpg"), "h-pending", 0, 500))
 
-	must(t, db.EnsurePending("h-failperm", 100, "application/octet-stream", "/mnt/c/Photos/2024/d.bmp", nil))
+	must(t, db.EnsurePending("h-failperm", 100, "application/octet-stream", filepath.Join(photoRoot, "2024", "d.bmp"), nil))
 	must(t, db.MarkFailed("h-failperm", true, "UNSUPPORTED_EXTENSION", "bad format"))
-	must(t, db.UpsertFileSeen("/mnt/c/Photos/2024/d.bmp", "h-failperm", 0, 100))
+	must(t, db.UpsertFileSeen(filepath.Join(photoRoot, "2024", "d.bmp"), "h-failperm", 0, 100))
 
-	must(t, db.EnsurePending("h-failretry", 300, "image/jpeg", "/mnt/c/Photos/2024/e.jpg", nil))
+	must(t, db.EnsurePending("h-failretry", 300, "image/jpeg", filepath.Join(photoRoot, "2024", "e.jpg"), nil))
 	must(t, db.MarkFailed("h-failretry", false, "TRANSIENT", "network blip"))
-	must(t, db.UpsertFileSeen("/mnt/c/Photos/2024/e.jpg", "h-failretry", 0, 300))
+	must(t, db.UpsertFileSeen(filepath.Join(photoRoot, "2024", "e.jpg"), "h-failretry", 0, 300))
 
 	// Duplicate content under a second path -- files_seen grows, uploads (distinct hashes) does not.
-	must(t, db.UpsertFileSeen("/mnt/c/Photos/2024_copy/a.jpg", "h-real", 0, 1000))
+	must(t, db.UpsertFileSeen(filepath.Join(photoRoot, "2024_copy", "a.jpg"), "h-real", 0, 1000))
 
 	s, err := db.LedgerSummary()
 	if err != nil {

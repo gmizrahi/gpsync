@@ -13,9 +13,9 @@ password hash.
 |-----|------|------------------|
 | `source_folders` | list | Folders gpsync scans and uploads when no path is given |
 | `concurrency` | number | How many files upload in parallel; the adaptive limiter may lower it under throttling |
-| `upload_quality` | text | `original` or `space_saver`; space saver downscales before upload |
-| `space_saver_max_dimension` | number | Longest edge, in pixels, for space-saver uploads |
-| `space_saver_jpeg_quality` | number | JPEG quality (1-100) for space-saver uploads |
+| `upload_quality` | text | `original` (default) or `space_saver`. See below |
+| `space_saver_max_dimension` | number | Longest edge in pixels, when `upload_quality = "space_saver"` |
+| `space_saver_jpeg_quality` | number | JPEG quality 1-100, when `upload_quality = "space_saver"` |
 | `backup_dir` | text | Where `gpsync backup` writes its archives |
 | `backup_keep_count` | number | How many backup archives to keep; older ones are pruned |
 | `trash_dir` | text | Where `gpsync duplicates resolve` moves copies you do not keep |
@@ -52,3 +52,25 @@ dashboard fails to bind.
 **Extension lists** take effect on the next scan. Adding an extension to
 `extra_unsupported_extensions` also stops existing queued entries for it from
 being retried.
+
+## About `upload_quality`
+
+`original` (the default) uploads your file byte for byte. `space_saver`
+re-encodes it smaller first, so it uses less of your Google storage.
+
+The name is unfortunate and worth explaining, because it does **not** mean
+Google's own "Storage saver" tier:
+
+- Google's Storage saver is server-side compression chosen in the Photos app.
+  Since 1 June 2021 it counts against your 15 GB like anything else; only
+  photos backed up before that date remain free.
+- **The Library API has no quality option at all.** `mediaItems.batchCreate`
+  accepts no such field, and Google states that media uploaded through the API
+  is stored at original quality and counts toward your storage. The
+  account-level toggle does not apply to API uploads.
+
+So the only way for gpsync to use less of your quota is to send fewer bytes,
+which is what `space_saver` does locally before uploading. Capture dates and
+other EXIF are carried across to the re-encoded file, so photos still appear
+under the date they were taken. TIFF is never re-encoded — see
+[limitations](limitations.md).

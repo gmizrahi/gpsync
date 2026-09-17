@@ -242,9 +242,21 @@ function fail(msg) { console.error(msg); process.exit(1); }
 
 	// A hard timeout, not just relying on setInterval being stubbed --
 	// belt and suspenders against this test itself ever hanging a CI run.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	//
+	// 60s, not 10s: node runs this in well under a second on a developer
+	// machine, but this package takes roughly 45x longer on a Windows CI
+	// runner (1.9s here, 85s there), and a 10s cap turned that into a
+	// failure that LOOKED like a thrown exception. The cap exists to stop a
+	// hang, so it only has to sit far enough above the real cost.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, nodePath, scriptPath).CombinedOutput()
+	if ctx.Err() != nil {
+		// Distinguished deliberately: a timeout means a slow or wedged
+		// runner, NOT the page's JavaScript throwing. Reporting it as a
+		// throw sent this exact failure down the wrong diagnosis once.
+		t.Fatalf("node did not finish within the timeout (%v) -- a slow or stuck runner, not a JS error:\n%s", ctx.Err(), out)
+	}
 	if err != nil {
 		t.Fatalf("refresh() threw under Node -- see internal/dashboard/js_smoke_test.go's own doc comment for why this matters:\n%s", out)
 	}

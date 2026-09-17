@@ -173,14 +173,14 @@ func TestDashboard_OnBytes_FinalChunkAlwaysForcesRedraw(t *testing.T) {
 
 	d := newDashboard("/some/folder", 1, 100, nil)
 	d.onBytes(uploader.ByteProgressEvent{Path: "/a.jpg", Sent: 50, Total: 100})
-	firstRedraw := d.lastRedrawAt
+	firstRedraw := d.redraws
 
 	// Immediately send the final chunk -- essentially no time has passed,
 	// well inside redrawInterval, so a naive throttle check would skip it.
 	d.onBytes(uploader.ByteProgressEvent{Path: "/a.jpg", Sent: 100, Total: 100})
-	secondRedraw := d.lastRedrawAt
+	secondRedraw := d.redraws
 
-	if !secondRedraw.After(firstRedraw) {
+	if secondRedraw <= firstRedraw {
 		t.Error("expected the 100% chunk to force an immediate redraw, bypassing the throttle")
 	}
 }
@@ -612,14 +612,14 @@ func TestDashboard_OnBackoff_RepaintsEveryTick(t *testing.T) {
 
 	s := activeBackoff()
 	d.onBackoff(s)
-	first := d.lastRedrawAt
+	first := d.redraws
 
 	// A second tick arriving well inside the throttle window must still paint.
 	s.RemainingWait = 46 * time.Second
 	d.onBackoff(s)
-	second := d.lastRedrawAt
+	second := d.redraws
 
-	if !second.After(first) {
+	if second <= first {
 		t.Error("a backoff tick did not repaint -- the countdown would sit frozen on screen for the whole pause")
 	}
 }

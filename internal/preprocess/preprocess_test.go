@@ -2,6 +2,7 @@ package preprocess
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -330,22 +331,15 @@ func TestPrepareUploadPath_OriginalQualityPreservesBytesAndEXIF(t *testing.T) {
 	}
 }
 
-// TestPrepareUploadPath_SpaceSaverStripsEXIF documents a currently
-// unfixed limitation, verified rather than assumed.
+// TestPrepareUploadPath_SpaceSaverPreservesEXIF replaces a test that used
+// to assert the opposite, back when downscaling dropped every tag.
 //
-// disintegration/imaging decodes to a raw image and re-encodes, carrying no
-// metadata across, so every EXIF tag -- DateTimeOriginal included -- is gone
-// from the bytes that reach Google. Since batchCreate has no date field,
-// Google then falls back to the upload time and the photo shows the wrong
-// "date taken". Only files that actually get downscaled are affected;
-// anything returned unchanged (see the passthrough test) keeps its EXIF.
-//
-// This test asserts the CURRENT behavior deliberately. If someone makes
-// space-saver preserve EXIF, this test should fail and be replaced by one
-// asserting preservation -- note that re-attaching the original APP1
-// segment naively would double-apply rotation, since imaging.Open already
-// auto-orients the pixels, so the Orientation tag must be normalized to 1.
-func TestPrepareUploadPath_SpaceSaverStripsEXIF(t *testing.T) {
+// This matters more than it looks: mediaItems.batchCreate has no date
+// field, so Google derives "date taken" from EXIF in the uploaded bytes. A
+// downscaled photo with no EXIF shows the upload date instead of when it
+// was taken, which made the whole space-saver mode close to useless on a
+// real library.
+func TestPrepareUploadPath_SpaceSaverPreservesEXIF(t *testing.T) {
 	isolateTempDir(t)
 	src := t.TempDir()
 	p := filepath.Join(src, "photo.jpg")
@@ -358,15 +352,67 @@ func TestPrepareUploadPath_SpaceSaverStripsEXIF(t *testing.T) {
 	out, cleanup := PrepareUploadPath(p, spaceSaverConfig())
 	defer cleanup()
 	if out == p {
-		t.Fatal("expected the image to be downscaled")
+		t.Fatal("test premise: the fixture was not downscaled, so this proves nothing")
 	}
 
-	if got, ok := dateTimeOriginal(t, out); ok {
-		t.Errorf("DateTimeOriginal = %q survived the resize -- if this now works, replace this test with one asserting preservation (and check Orientation isn't double-applied)", got)
+	got, ok := dateTimeOriginal(t, out)
+	if !ok {
+		t.Fatal("the downscaled copy has no EXIF -- Google would show the upload date as the date taken")
 	}
+	if got != "\"2021:07:04 11:22:33\"" {
+		t.Errorf("DateTimeOriginal = %q, want it carried across unchanged", got)
+	}
+}
 
-	// The source itself must be untouched either way.
-	if _, ok := dateTimeOriginal(t, p); !ok {
-		t.Error("the ORIGINAL file lost its EXIF -- space saver must never modify the source")
+// TestCarryEXIF_NormalisesOrientation pins the trap that makes a naive copy
+// wrong: imaging.Open auto-orients the PIXELS, so copying the source's
+// Orientation tag verbatim would make every viewer rotate them a second
+// time and land portrait photos on their side in Google Photos.
+func TestCarryEXIF_NormalisesOrientation(t *testing.T) {
+	seg := exifAPP1WithOrientation(6) // 6 = rotate 90 CW
+	if !normaliseOrientation(seg) {
+		t.Fatal("normaliseOrientation refused a segment it should understand")
 	}
+	if got := orientationOf(t, seg); got != 1 {
+		t.Errorf("Orientation = %d, want 1 -- the pixels are already rotated", got)
+	}
+}
+
+// TestReadEXIFSegment_NoEXIFIsNotAnError covers the ordinary case of a JPEG
+// with no metadata: nothing to carry, and nothing invented.
+func TestReadEXIFSegment_NoEXIFIsNotAnError(t *testing.T) {
+	isolateTempDir(t)
+	p := filepath.Join(t.TempDir(), "plain.jpg")
+	writeJPEG(t, p, 32, 32, 9)
+	if seg := readEXIFSegment(p); seg != nil {
+		t.Errorf("readEXIFSegment returned %d bytes for a JPEG with no EXIF", len(seg))
+	}
+}
+
+// exifAPP1WithOrientation builds an APP1 segment whose IFD0 carries an
+// Orientation tag set to want, for the normalisation test.
+func exifAPP1WithOrientation(want uint16) []byte {
+	tiff := []byte{'I', 'I', 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00}
+	tiff = append(tiff, 0x01, 0x00) // IFD0: one entry
+	tiff = append(tiff, 0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00)
+	tiff = append(tiff, byte(want), byte(want>>8), 0x00, 0x00)
+	tiff = append(tiff, 0x00, 0x00, 0x00, 0x00) // next IFD: none
+	payload := append([]byte("Exif\x00\x00"), tiff...)
+	segLen := len(payload) + 2
+	return append([]byte{0xFF, 0xE1, byte(segLen >> 8), byte(segLen)}, payload...)
+}
+
+// orientationOf reads the Orientation tag straight back out of a segment.
+func orientationOf(t *testing.T, seg []byte) uint16 {
+	t.Helper()
+	tiff := seg[4+len("Exif\x00\x00"):]
+	count := binary.LittleEndian.Uint16(tiff[8:10])
+	for e := 0; e < int(count); e++ {
+		off := 10 + e*12
+		if binary.LittleEndian.Uint16(tiff[off:off+2]) == 0x0112 {
+			return binary.LittleEndian.Uint16(tiff[off+8 : off+10])
+		}
+	}
+	t.Fatal("no Orientation tag in the fixture")
+	return 0
 }

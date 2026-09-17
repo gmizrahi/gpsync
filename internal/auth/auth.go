@@ -26,6 +26,7 @@ import (
 	"golang.org/x/oauth2/google"
 	"gopkg.in/ini.v1"
 
+	"github.com/gmizrahi/gpsync/internal/fsperm"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
 
@@ -44,7 +45,7 @@ var (
 //
 // Deliberately NOT requested: photoslibrary.readonly.appcreateddata. It
 // existed only for the removed reconcile-against-the-API feature (see
-// .ai/CLAUDE.md's "No reconcile-against-the-API step" rule); gpsync never reads
+// gpsync deliberately never reconciles against the API, so it never reads
 // media items back from Google, so asking for read access on a fresh
 // consent screen would be requesting more than the tool needs. Dropping it
 // only affects NEW consent flows (`gpsync setup`/`gpsync import-rclone`) —
@@ -135,7 +136,9 @@ func SaveClientSecret(cs ClientSecret) error {
 	if err := os.WriteFile(ClientSecretPath, data, 0o600); err != nil {
 		return err
 	}
-	return nil
+	// Windows ignores the mode above; keep SECURITY.md's owner-only promise
+	// with an ACL there. No-op on POSIX, where 0600 is already the answer.
+	return fsperm.RestrictToOwner(ClientSecretPath)
 }
 
 func loadToken() *oauth2.Token {
@@ -176,7 +179,9 @@ func saveToken(tok *oauth2.Token) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return nil
+	// Applied AFTER the rename: the ACL belongs on the file that survives,
+	// and a rename does not carry the staging file's DACL to the target.
+	return fsperm.RestrictToOwner(TokenPath)
 }
 
 // persistingTokenSource writes the token back to disk whenever the

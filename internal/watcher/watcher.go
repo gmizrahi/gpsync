@@ -203,18 +203,23 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 		return
 	}
 
-	if ev.Has(fsnotify.Create) {
-		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-			if !scanner.IsIgnoredDirName(base) {
-				if err := w.addTree(ev.Name); err != nil {
-					w.reportErr(err)
-				}
+	// A DIRECTORY event is never a file change, whatever the op. Windows
+	// emits a WRITE on the parent directory alongside the file's own
+	// events, which Linux does not; without this check that WRITE fell
+	// through to resetTimer(filepath.Dir(dir)) and debounced the dir's
+	// PARENT -- for a top-level folder, the whole source root. It arrives
+	// first, so Ready() reported the root before the real file event could
+	// report the leaf, and gpsync rescanned the entire root over one edit.
+	if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+		// A newly created directory still needs watching; whatever lands
+		// inside it then generates its own events (and now that it is
+		// watched, gpsync sees them).
+		if ev.Has(fsnotify.Create) && !scanner.IsIgnoredDirName(base) {
+			if err := w.addTree(ev.Name); err != nil {
+				w.reportErr(err)
 			}
-			// The directory's own creation isn't a file change to debounce
-			// on -- whatever lands inside it generates its own events next
-			// (and now that it's watched, gpsync will see them).
-			return
 		}
+		return
 	}
 
 	w.resetTimer(filepath.Dir(ev.Name))

@@ -62,3 +62,14 @@ your account is. Check that in the Google One UI.
 The CLI builds and runs anywhere Go does. The tray app is Windows-only — it
 uses the Win32 notification-area APIs directly. There is no macOS or Linux
 tray build.
+
+## TIFF files are always uploaded at original quality
+
+`upload_quality = "space_saver"` downscales JPEG, PNG and WebP before
+uploading. TIFF is deliberately excluded: downscaling it would mean decoding
+it, and the pure-Go TIFF decoder gpsync depends on has a known crash on
+crafted files with no fixed version available. Since TIFF is lossless,
+uploading the original is the better result in any case.
+
+TIFF files are still uploaded normally — only the downscaling step skips
+them.
