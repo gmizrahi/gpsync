@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gmizrahi/gpsync/internal/auth"
+	"github.com/gmizrahi/gpsync/internal/version"
 )
 
 // withScratchCredentials points auth's credential paths at a temp dir.
@@ -255,4 +256,31 @@ func readBody(t *testing.T, resp *http.Response) string {
 		}
 	}
 	return sb.String()
+}
+
+// The top bar and tab title carry the build version, so a dashboard left
+// open in a tab says which build it is. Asserts on both places the app
+// name is rendered, since they are interpolated separately.
+func TestPageShell_TitleCarriesTheVersion(t *testing.T) {
+	db := openTestDB(t)
+	withScratchCredentials(t)
+
+	srv := newTestServer(t, db, newFakeController(), Options{AppName: "GPhotos Sync"})
+	resp, err := newTestClient(t).Get(srv.URL + "/settings")
+	mustNoErr(t, err)
+	body := readBody(t, resp)
+	resp.Body.Close()
+
+	want := "GPhotos Sync " + version.Version
+	if !strings.Contains(body, "<h1>"+want+"</h1>") {
+		t.Errorf("top bar does not read %q", want)
+	}
+	if !strings.Contains(body, "— "+want+"</title>") {
+		t.Errorf("tab title does not end with %q", want)
+	}
+	// The version must be a real value, not an empty string quietly
+	// rendering as a trailing space.
+	if version.Version == "" {
+		t.Fatal("version.Version is empty")
+	}
 }

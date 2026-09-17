@@ -6,6 +6,7 @@ import (
 
 	"github.com/gmizrahi/gpsync/internal/config"
 	"github.com/gmizrahi/gpsync/internal/statedb"
+	"github.com/gmizrahi/gpsync/internal/version"
 )
 
 // sharedCSS is used by every page this server renders -- card-based
@@ -46,6 +47,17 @@ var sharedCSS string
 // not doing a filesystem stat sweep on every single page load) and
 // db.CountsByStatus()["needs_review"] (already the cheapest possible
 // count query).
+// titleName is the app name with the build's version, shown in the tab
+// title and the top bar -- asked for directly, so a dashboard left open
+// says which build it is rather than only which app.
+//
+// version.Version already carries its own "v" prefix for a stamped build
+// and is "dev" for `go build`/`go run`, which is worth showing rather than
+// hiding: an unstamped build is exactly the case where knowing matters.
+func titleName() string {
+	return appName + " " + version.Version
+}
+
 func pageShell(db *statedb.DB, pageTitle, active, body, theme string, authEnabled bool) string {
 	navLink := func(href, label, id string) string {
 		cls := ""
@@ -139,7 +151,7 @@ func pageShell(db *statedb.DB, pageTitle, active, body, theme string, authEnable
 <main%s>%s</main>
 <script>(function(){if(!window.matchMedia||!matchMedia('(max-width: 600px)').matches)return;var a=document.querySelector('.nav a.active');if(a&&a.scrollIntoView)a.scrollIntoView({block:'nearest',inline:'center'});})();</script>
 </body>
-</html>`, themeAttr, pageTitle, appName, sharedCSS, bodyClass, appName, nav, mainClass, body)
+</html>`, themeAttr, pageTitle, titleName(), sharedCSS, bodyClass, titleName(), nav, mainClass, body)
 }
 
 // statusPageBody is deliberately still JS-driven (unlike the settings page
