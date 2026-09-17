@@ -187,6 +187,12 @@ type Config struct {
 	// duplicates, and runs backup/restore. TLSModeAcme therefore requires
 	// DashboardAuthEnabled, on the same reasoning as BindNeedsAuth.
 	DashboardTLSDomain string `toml:"dashboard_tls_domain"`
+	// DashboardTLSGuarded is set by Load when it had to downgrade
+	// TLSModeAcme because authentication was off. Runtime-only
+	// (`toml:"-"`) for the same reason as DashboardBindGuarded: it
+	// describes what THIS load corrected, and persisting it would turn a
+	// one-off correction into a stored preference.
+	DashboardTLSGuarded bool `toml:"-"`
 }
 
 // The DashboardTLSMode values. TLSModeSelfSigned generates and manages a
@@ -338,6 +344,21 @@ func Load() (Config, error) {
 	// it rather than silently continuing.
 	if strings.TrimSpace(cfg.DashboardTLSMode) == "" {
 		cfg.DashboardTLSMode = TLSModeOff
+	}
+	// Backstop for a hand-edited config.toml, mirroring the bind clamp
+	// above -- ApplySettingsForm already refuses this pair through the UI,
+	// so this is the path for someone editing the file directly.
+	//
+	// Downgraded to self-signed rather than refused or switched off.
+	// Refusing would leave no dashboard at all, and switching TLS off
+	// would serve plain HTTP on a host the user clearly meant to expose.
+	// Self-signed keeps the traffic encrypted, and nothing is lost by not
+	// attempting ACME: the bind clamp above has already pulled the
+	// listener back to loopback, so the challenge could not have
+	// completed regardless.
+	if cfg.DashboardTLSMode == TLSModeAcme && !cfg.DashboardAuthEnabled {
+		cfg.DashboardTLSMode = TLSModeSelfSigned
+		cfg.DashboardTLSGuarded = true
 	}
 	return cfg, nil
 }

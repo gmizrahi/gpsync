@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -292,5 +293,86 @@ func TestLoad_HandEditedEmptyTLSMode_DefaultsToOff(t *testing.T) {
 	}
 	if cfg.DashboardTLSMode != TLSModeOff {
 		t.Errorf("DashboardTLSMode = %q, want %q for a hand-edited empty value", cfg.DashboardTLSMode, TLSModeOff)
+	}
+}
+
+// A hand-edited config asking for ACME with no login is corrected rather
+// than obeyed: an internet-reachable hostname in front of a dashboard that
+// edits settings and moves files needs authentication. Downgraded, not
+// refused, so a bad edit never leaves someone with no dashboard at all.
+func TestLoad_AcmeWithoutAuth_FallsBackToSelfSigned(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GPSYNC_STATE_DIR", dir)
+	ConfigPath = filepath.Join(dir, "config.toml")
+
+	body := `dashboard_tls_mode = "acme"
+dashboard_tls_domain = "dashboard.example.com"
+dashboard_auth_enabled = false
+`
+	if err := os.WriteFile(ConfigPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DashboardTLSMode != TLSModeSelfSigned {
+		t.Errorf("DashboardTLSMode = %q, want %q -- ACME without auth must be downgraded", cfg.DashboardTLSMode, TLSModeSelfSigned)
+	}
+	if !cfg.DashboardTLSGuarded {
+		t.Error("DashboardTLSGuarded = false, want true so the tray can say why the mode changed")
+	}
+}
+
+// The same config WITH authentication is left exactly as written -- the
+// clamp must correct only the unsafe pairing, never second-guess a valid one.
+func TestLoad_AcmeWithAuth_IsLeftAlone(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GPSYNC_STATE_DIR", dir)
+	ConfigPath = filepath.Join(dir, "config.toml")
+
+	body := `dashboard_tls_mode = "acme"
+dashboard_tls_domain = "dashboard.example.com"
+dashboard_auth_enabled = true
+dashboard_auth_user = "admin"
+dashboard_auth_pass_hash = "not-a-real-hash"
+`
+	if err := os.WriteFile(ConfigPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DashboardTLSMode != TLSModeAcme {
+		t.Errorf("DashboardTLSMode = %q, want %q left untouched", cfg.DashboardTLSMode, TLSModeAcme)
+	}
+	if cfg.DashboardTLSGuarded {
+		t.Error("DashboardTLSGuarded = true, want false when nothing needed correcting")
+	}
+	if cfg.DashboardTLSDomain != "dashboard.example.com" {
+		t.Errorf("DashboardTLSDomain = %q, want it preserved", cfg.DashboardTLSDomain)
+	}
+}
+
+// DashboardTLSGuarded describes one load, not a preference, so it must
+// never reach config.toml -- persisting it would make a correction look
+// like something the user chose.
+func TestSave_DoesNotPersistTLSGuarded(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GPSYNC_STATE_DIR", dir)
+	ConfigPath = filepath.Join(dir, "config.toml")
+
+	cfg := Defaults()
+	cfg.DashboardTLSGuarded = true
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(ConfigPath)
+	if err != nil {
+		t.Fatalf("reading config: %v", err)
+	}
+	if strings.Contains(string(data), "guarded") {
+		t.Errorf("config.toml mentions a guard flag:\n%s", data)
 	}
 }
