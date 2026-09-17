@@ -90,8 +90,12 @@ func isLoopbackRequest(r *http.Request) bool {
 // and never logged or echoed back -- ParseClientSecretJSON's errors are
 // tested not to include it.
 func handleSignInUpload(w http.ResponseWriter, r *http.Request) {
+	// MaxBytesReader is the real cap: ParseMultipartForm's argument is only
+	// how much it keeps in memory before spilling to a temp file, so it
+	// bounds nothing on its own. With the body already limited, a small
+	// memory budget is enough for a few-hundred-byte credential file.
 	r.Body = http.MaxBytesReader(w, r.Body, maxCredentialUpload)
-	if err := r.ParseMultipartForm(maxCredentialUpload); err != nil {
+	if err := r.ParseMultipartForm(4 << 10); err != nil { //nolint:gosec // G120: bounded by MaxBytesReader above
 		redirectSignIn(w, r, "", "that file is too large to be a client_secret.json")
 		return
 	}
