@@ -11,6 +11,13 @@ permissions:
 jobs:
   test:
     strategy:
+      # A matrix cancels its siblings on the first failure by default, which
+      # is exactly wrong for a cross-platform suite: a Windows failure kills
+      # the ubuntu/macOS jobs before they report, so "Windows-only" and
+      # "broken everywhere" look identical and each fix costs an extra run to
+      # tell apart. It also silently discards the output of a job added to
+      # print diagnostics from a failing platform.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
