@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0]
+
+### Added
+
+- **HTTPS for the dashboard**, off by default. `dashboard_tls_mode` is `off`,
+  `self-signed` or `files`; `dashboard_https_port` is the TLS listener's port.
+  HTTPS runs *alongside* HTTP rather than replacing it, so the tray keeps
+  opening the dashboard locally over loopback with no certificate to trust.
+- `self-signed` generates a certificate once into `~/.gpsync`, reuses it on
+  every later start, and logs its SHA-256 fingerprint so the one-time browser
+  warning can be checked before it is trusted. `files` serves a certificate you
+  supply and never writes to it.
+
+### Fixed
+
+- **The watcher debounced the wrong folder on Windows.** A directory event was
+  only filtered on create, so Windows' extra write on a parent directory fell
+  through and debounced that directory's *parent* — for a top-level folder,
+  the entire source root. Syncing could stall well beyond the debounce window.
+- **Capture dates were lost when "space saver" was on.** Downscaling re-encoded
+  the image and dropped its EXIF, so those uploads showed the upload date in
+  Google Photos instead of the date taken. The original EXIF is now carried
+  across, with orientation normalised so rotation is not applied twice.
+- **TIFF files are always uploaded as the original** rather than downscaled,
+  which also avoids a decoder panic in the image library.
+- The Settings page now exposes the TLS fields it had already been parsing.
+  Without inputs for them, an absent field read as empty, so saving Settings
+  for any unrelated reason would have switched HTTPS back off.
+
+### Security
+
+- `client_secret.json`, `token.json` and backup archives are now readable only
+  by the owner on Windows, set through an explicit ACL. Windows has no POSIX
+  mode bits, so the 0600 these files already used on Linux and macOS had no
+  effect there.
+
 ## [0.1.0] — first public release
 
 gpsync syncs local photo and video folders to Google Photos and keeps a
@@ -105,5 +141,6 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/gmizrahi/gpsync/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gmizrahi/gpsync/releases/tag/v0.1.0
