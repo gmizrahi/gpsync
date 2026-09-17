@@ -242,6 +242,11 @@ func TestSaveLoad_RoundTripsTLSSettings(t *testing.T) {
 	ConfigPath = filepath.Join(dir, "config.toml")
 
 	cfg := Defaults()
+	// Auth on, or Load would correctly downgrade acme to self-signed and
+	// this would be testing the clamp rather than the round trip.
+	cfg.DashboardAuthEnabled = true
+	cfg.DashboardAuthUser = "admin"
+	cfg.DashboardAuthPassHash = "not-a-real-hash"
 	cfg.DashboardTLSMode = TLSModeAcme
 	cfg.DashboardTLSDomain = "dashboard.example.com"
 	cfg.DashboardTLSCertFile = filepath.Join("C:\\certs", "gpsync.crt")
