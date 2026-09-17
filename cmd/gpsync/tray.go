@@ -182,7 +182,13 @@ func trayQuitCmd() *cobra.Command {
 			// A generous timeout: the response is written BEFORE the
 			// shutdown starts (see the handler), so this is only waiting
 			// on the request itself, not on uploads draining.
-			client := &http.Client{Timeout: 5 * time.Second}
+			//
+			// Through trayHTTPClient, not a bare client: against a
+			// self-signed dashboard a default client rejects the
+			// handshake, and this would report "not running" for a tray
+			// that is running -- then exit 0, so a deploy script would
+			// replace the binary out from under it.
+			client := trayHTTPClient(cfg, 5*time.Second)
 			resp, err := client.Do(req)
 			if err != nil {
 				fmt.Println("gpsync-tray is not running -- nothing to quit.")
