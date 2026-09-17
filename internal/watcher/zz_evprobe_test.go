@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ func TestProbe_RawEventNames(t *testing.T) {
 		}
 	}
 
+	var seen []string
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -42,9 +44,9 @@ func TestProbe_RawEventNames(t *testing.T) {
 				if !ok {
 					return
 				}
-				fmt.Printf("PROBE goos=%s op=%-14s name=%q dir=%q\n", runtime.GOOS, ev.Op.String(), ev.Name, filepath.Dir(ev.Name))
+				seen = append(seen, fmt.Sprintf("goos=%s op=%s name=%q dir=%q", runtime.GOOS, ev.Op.String(), ev.Name, filepath.Dir(ev.Name)))
 			case err := <-fsw.Errors:
-				fmt.Printf("PROBE error: %v\n", err)
+				seen = append(seen, fmt.Sprintf("error: %v", err))
 			case <-deadline:
 				return
 			}
@@ -56,5 +58,8 @@ func TestProbe_RawEventNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-done
-	fmt.Printf("PROBE expected leaf = %q\n", sub)
+	// Deliberately fails: a passing test's output never reaches a CI log
+	// without -v, which is why two earlier probe attempts produced nothing.
+	t.Fatalf("PROBE (expected failure -- this is how the evidence gets printed)\n  expected leaf = %q\n  events:\n    %s",
+		sub, strings.Join(seen, "\n    "))
 }
