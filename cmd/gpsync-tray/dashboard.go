@@ -98,14 +98,6 @@ func startDashboard(db *statedb.DB, wc *watchController) (addr string, stop func
 		ln.Close()
 		return "", nil, fmt.Errorf("dashboard TLS: %w", err)
 	}
-	if cfg.DashboardTLSGuarded {
-		// config.Load downgraded acme because auth is off. Said out loud
-		// for the same reason the bind guard above is: a silently changed
-		// mode reads as the setting having been ignored.
-		log.Printf("dashboard: TLS mode %q needs dashboard authentication, so using %q instead -- "+
-			"turn on dashboard auth in Settings to use a publicly-trusted certificate",
-			config.TLSModeAcme, config.TLSModeSelfSigned)
-	}
 	if tlsSetup.Enabled {
 		if tlsSetup.Files.Generated {
 			log.Printf("dashboard: generated a self-signed certificate at %s", tlsSetup.Files.CertPath)

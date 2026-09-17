@@ -188,13 +188,12 @@ func ApplySettingsForm(current config.Config, values url.Values) (config.Config,
 		tlsMode = config.TLSModeOff
 	}
 	if !config.TLSModeValid(tlsMode) {
-		return current, fmt.Errorf("dashboard TLS mode must be %q, %q, %q, or %q (got %q)",
-			config.TLSModeOff, config.TLSModeSelfSigned, config.TLSModeFiles, config.TLSModeAcme, tlsMode)
+		return current, fmt.Errorf("dashboard TLS mode must be %q, %q, or %q (got %q)",
+			config.TLSModeOff, config.TLSModeSelfSigned, config.TLSModeFiles, tlsMode)
 	}
 	cfg.DashboardTLSMode = tlsMode
 	cfg.DashboardTLSCertFile = strings.TrimSpace(values.Get("dashboard_tls_cert_file"))
 	cfg.DashboardTLSKeyFile = strings.TrimSpace(values.Get("dashboard_tls_key_file"))
-	cfg.DashboardTLSDomain = strings.TrimSpace(values.Get("dashboard_tls_domain"))
 
 	switch cfg.DashboardTLSMode {
 	case config.TLSModeFiles:
@@ -203,18 +202,6 @@ func ApplySettingsForm(current config.Config, values url.Values) (config.Config,
 		// rather than the configuration mistake it is.
 		if cfg.DashboardTLSCertFile == "" || cfg.DashboardTLSKeyFile == "" {
 			return current, fmt.Errorf("TLS mode %q needs both a certificate file and a key file", config.TLSModeFiles)
-		}
-	case config.TLSModeAcme:
-		if cfg.DashboardTLSDomain == "" {
-			return current, fmt.Errorf("TLS mode %q needs the public hostname the certificate is for (e.g. dashboard.example.com)", config.TLSModeAcme)
-		}
-		// Same reasoning as the listen-address rule above, at a larger
-		// scale: a hostname that resolves from the internet means this
-		// dashboard is reachable from the internet, so a login is not
-		// optional.
-		if !cfg.DashboardAuthEnabled {
-			return current, fmt.Errorf("TLS mode %q means the dashboard is reachable from the internet, so it requires authentication: "+
-				"turn on dashboard auth with a username and password first", config.TLSModeAcme)
 		}
 	}
 

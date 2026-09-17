@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -125,31 +124,6 @@ func TestTLSSetupFor_FilesModeMissingPair_IsAnError(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Error("generated a fallback certificate instead of reporting the missing one")
-	}
-}
-
-// acme is a known mode this build cannot serve yet. It must say so rather
-// than downgrade: someone who configured acme wants a publicly-trusted
-// certificate, and silently giving them a self-signed one would look like
-// ACME had failed rather than never having run.
-func TestTLSSetupFor_AcmeIsReportedNotDowngraded(t *testing.T) {
-	dir := t.TempDir()
-	cfg := config.Defaults()
-	cfg.DashboardTLSMode = config.TLSModeAcme
-	cfg.DashboardTLSDomain = "dashboard.example.com"
-
-	got, err := TLSSetupFor(cfg, dir, testHosts(), time.Now())
-	if err == nil {
-		t.Fatal("err = nil, want acme reported as unsupported in this build")
-	}
-	if !errors.Is(err, ErrTLSModeUnsupported) {
-		t.Errorf("error %v does not wrap ErrTLSModeUnsupported, so a caller cannot distinguish it", err)
-	}
-	if got.Enabled {
-		t.Error("Enabled = true alongside an error")
-	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Error("generated a self-signed certificate as a silent fallback for acme")
 	}
 }
 

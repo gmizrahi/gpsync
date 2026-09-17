@@ -177,34 +177,16 @@ type Config struct {
 	// did not create would destroy it.
 	DashboardTLSCertFile string `toml:"dashboard_tls_cert_file"`
 	DashboardTLSKeyFile  string `toml:"dashboard_tls_key_file"`
-	// DashboardTLSDomain is the public hostname for TLSModeAcme, e.g.
-	// "dashboard.example.com". It must resolve to this machine from the
-	// internet, or the ACME challenge cannot complete.
-	//
-	// Reaching that point means the dashboard is exposed to the internet
-	// rather than just the LAN, which is a materially larger step: it
-	// edits settings, browses the whole library, moves files resolving
-	// duplicates, and runs backup/restore. TLSModeAcme therefore requires
-	// DashboardAuthEnabled, on the same reasoning as BindNeedsAuth.
-	DashboardTLSDomain string `toml:"dashboard_tls_domain"`
-	// DashboardTLSGuarded is set by Load when it had to downgrade
-	// TLSModeAcme because authentication was off. Runtime-only
-	// (`toml:"-"`) for the same reason as DashboardBindGuarded: it
-	// describes what THIS load corrected, and persisting it would turn a
-	// one-off correction into a stored preference.
-	DashboardTLSGuarded bool `toml:"-"`
 }
 
 // The DashboardTLSMode values. TLSModeSelfSigned generates and manages a
 // certificate under ~/.gpsync and is the only mode that needs no domain at
 // all, which is why it suits the default deployment on loopback or a LAN
-// address; TLSModeAcme is for a machine genuinely reachable by hostname
-// from the internet.
+// address.
 const (
 	TLSModeOff        = "off"
 	TLSModeSelfSigned = "self-signed"
 	TLSModeFiles      = "files"
-	TLSModeAcme       = "acme"
 )
 
 // TLSModeValid reports whether mode is one gpsync understands. Exported so
@@ -213,7 +195,7 @@ const (
 // same drift it exists to prevent.
 func TLSModeValid(mode string) bool {
 	switch mode {
-	case TLSModeOff, TLSModeSelfSigned, TLSModeFiles, TLSModeAcme:
+	case TLSModeOff, TLSModeSelfSigned, TLSModeFiles:
 		return true
 	}
 	return false
@@ -344,21 +326,6 @@ func Load() (Config, error) {
 	// it rather than silently continuing.
 	if strings.TrimSpace(cfg.DashboardTLSMode) == "" {
 		cfg.DashboardTLSMode = TLSModeOff
-	}
-	// Backstop for a hand-edited config.toml, mirroring the bind clamp
-	// above -- ApplySettingsForm already refuses this pair through the UI,
-	// so this is the path for someone editing the file directly.
-	//
-	// Downgraded to self-signed rather than refused or switched off.
-	// Refusing would leave no dashboard at all, and switching TLS off
-	// would serve plain HTTP on a host the user clearly meant to expose.
-	// Self-signed keeps the traffic encrypted, and nothing is lost by not
-	// attempting ACME: the bind clamp above has already pulled the
-	// listener back to loopback, so the challenge could not have
-	// completed regardless.
-	if cfg.DashboardTLSMode == TLSModeAcme && !cfg.DashboardAuthEnabled {
-		cfg.DashboardTLSMode = TLSModeSelfSigned
-		cfg.DashboardTLSGuarded = true
 	}
 	return cfg, nil
 }

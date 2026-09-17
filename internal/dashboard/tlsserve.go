@@ -7,12 +7,6 @@ import (
 	"github.com/gmizrahi/gpsync/internal/config"
 )
 
-// ErrTLSModeUnsupported is returned for a mode gpsync knows the name of but
-// cannot serve in this build. It exists so the caller reports the mode
-// rather than quietly serving something else: plain HTTP to someone who
-// believes they enabled TLS is the outcome worth failing over.
-var ErrTLSModeUnsupported = fmt.Errorf("dashboard TLS mode is not supported by this build")
-
 // TLSSetup is how the dashboard's listener should be served.
 type TLSSetup struct {
 	// Enabled is false for config.TLSModeOff, where Files is unset and the
@@ -54,18 +48,9 @@ func TLSSetupFor(cfg config.Config, dir string, hosts []string, now time.Time) (
 		}
 		return TLSSetup{Enabled: true, Files: files}, nil
 
-	case config.TLSModeAcme:
-		// Deliberately an error, not a downgrade to self-signed: someone who
-		// configured acme wants a publicly-trusted certificate, and quietly
-		// handing them one their browser will warn about would look like
-		// ACME had failed rather than never having been attempted.
-		return TLSSetup{}, fmt.Errorf("%w: %q needs the ACME challenge listener, which is not wired up yet",
-			ErrTLSModeUnsupported, config.TLSModeAcme)
-
 	default:
-		return TLSSetup{}, fmt.Errorf("unknown dashboard TLS mode %q (expected %q, %q, %q, or %q)",
-			cfg.DashboardTLSMode, config.TLSModeOff, config.TLSModeSelfSigned,
-			config.TLSModeFiles, config.TLSModeAcme)
+		return TLSSetup{}, fmt.Errorf("unknown dashboard TLS mode %q (expected %q, %q, or %q)",
+			cfg.DashboardTLSMode, config.TLSModeOff, config.TLSModeSelfSigned, config.TLSModeFiles)
 	}
 }
 
