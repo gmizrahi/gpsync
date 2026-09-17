@@ -1,13 +1,20 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gmizrahi/gpsync/internal/config"
+	// Aliased: this package has its own `dashboard` type, the terminal
+	// renderer in dashboard.go.
+	webdashboard "github.com/gmizrahi/gpsync/internal/dashboard"
 	"github.com/gmizrahi/gpsync/internal/engine"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 	"github.com/spf13/cobra"
@@ -31,7 +38,52 @@ func trayDashboardURL(cfg config.Config) string {
 	if cfg.DashboardPort == 0 {
 		return ""
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d/api/status", cfg.DashboardPort)
+	return trayDashboardBase(cfg) + "/api/status"
+}
+
+// trayDashboardBase is the scheme+host+port every request to a running
+// tray starts from. The scheme has to follow dashboard_tls_mode: a
+// hardcoded "http://" silently broke both the running-tray notice and
+// `gpsync tray-quit` the moment TLS was switched on, which is exactly the
+// command that exists so the binary can be replaced without cutting a
+// transfer off.
+func trayDashboardBase(cfg config.Config) string {
+	scheme := "http"
+	if cfg.DashboardTLSMode != "" && cfg.DashboardTLSMode != config.TLSModeOff {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://127.0.0.1:%d", scheme, cfg.DashboardPort)
+}
+
+// trayHTTPClient talks to the local tray, trusting the certificate gpsync
+// itself generated rather than skipping verification.
+//
+// In self-signed mode nothing else trusts that certificate, so the client
+// is given exactly it as its only root. InsecureSkipVerify would have been
+// shorter and is the reflex here, but it accepts ANY certificate on that
+// port -- strictly worse for no benefit, since we wrote this one and know
+// where it lives. The generated certificate covers 127.0.0.1 (see
+// DefaultCertHosts), so verification succeeds on the nose.
+//
+// files and acme modes get the system pool: those chain to a CA the
+// machine already trusts. A user-supplied certificate that does not cover
+// loopback will fail here -- correctly, and the callers report it rather
+// than pretending the tray is absent.
+func trayHTTPClient(cfg config.Config, timeout time.Duration) *http.Client {
+	client := &http.Client{Timeout: timeout}
+	if cfg.DashboardTLSMode != config.TLSModeSelfSigned {
+		return client
+	}
+	pem, err := os.ReadFile(filepath.Join(statedb.StateDir, webdashboard.TLSCertFileName))
+	if err != nil {
+		return client
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return client
+	}
+	client.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
+	return client
 }
 
 // trayRunningNotice checks whether gpsync-tray's dashboard is currently
@@ -51,13 +103,13 @@ func trayRunningNotice(cfg config.Config) string {
 	if url == "" {
 		return ""
 	}
-	client := &http.Client{Timeout: 300 * time.Millisecond}
+	client := trayHTTPClient(cfg, 300*time.Millisecond)
 	resp, err := client.Get(url)
 	if err != nil {
 		return ""
 	}
 	resp.Body.Close()
-	return fmt.Sprintf("gpsync-tray is currently running (dashboard: http://127.0.0.1:%d) -- safe to run alongside; you may see overlapping activity.", cfg.DashboardPort)
+	return fmt.Sprintf("gpsync-tray is currently running (dashboard: %s) -- safe to run alongside; you may see overlapping activity.", trayDashboardBase(cfg))
 }
 
 // trayQuitCmd asks a running gpsync-tray to shut down gracefully -- in-flight
@@ -106,7 +158,7 @@ func trayQuitCmd() *cobra.Command {
 				fmt.Println("gpsync-tray does not appear to have run yet (no dashboard port recorded) -- nothing to quit.")
 				return nil
 			}
-			url := fmt.Sprintf("http://127.0.0.1:%d/api/quit", cfg.DashboardPort)
+			url := trayDashboardBase(cfg) + "/api/quit"
 			req, err := http.NewRequest(http.MethodPost, url, nil)
 			if err != nil {
 				return err
