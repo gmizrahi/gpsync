@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"testing"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -458,7 +459,17 @@ func randomState() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// OpenBrowser opens url in the user's browser.
+//
+// A no-op under `go test`: this reaches out of the process and puts a
+// window on a real person's desktop, and an OAuth consent screen at that.
+// Guarding it structurally rather than by remembering to stub it means no
+// test or dev tool can do that by accident, whatever calls it.
 func OpenBrowser(url string) {
+	if testing.Testing() {
+		return
+	}
+
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
