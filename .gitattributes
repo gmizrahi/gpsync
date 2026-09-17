@@ -1,0 +1,15 @@
+# Keep line endings LF in the working tree on every platform.
+#
+# internal/dashboard/assets/*.html is //go:embed'ed, so a Windows checkout
+# with core.autocrlf=true rewrites it to CRLF and compiles THAT into the
+# binary. It also broke a test that searches the embedded script for a
+# byte-exact "\nrefresh();\n". Normalising here fixes the cause rather than
+# loosening the assertion.
+* text=auto eol=lf
+
+# Binary files must never be line-ending converted.
+*.png  binary
+*.ico  binary
+*.zip  binary
+*.gz   binary
+*.exe  binary
