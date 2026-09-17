@@ -82,6 +82,13 @@ func pageShell(db *statedb.DB, pageTitle, active, body, theme string, authEnable
 	if hasOriginalsReview {
 		nav += navLink("/originals", "Originals", "originals") + " "
 	}
+	// Only while there is nothing to sync with. Once a token exists the
+	// page has nothing to offer, and Settings' Account card already
+	// reports the state. accountStatus() rather than auth.HasToken keeps
+	// this file free of the auth import; it is the same os.Stat either way.
+	if !accountStatus().HasToken {
+		nav += navLink("/signin", "Sign in", "signin") + " "
+	}
 	nav += navLink("/settings", "Settings", "settings")
 	// Logout only makes sense once there's a session to end, so it is
 	// hidden entirely when auth is off.

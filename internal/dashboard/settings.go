@@ -134,7 +134,7 @@ var settingsTmpl = template.Must(template.New("settings").Parse(`
   <div class="row"><span class="label">OAuth client</span>{{if .Account.HasCredentials}}<span class="badge badge-ok">configured</span>{{else}}<span class="badge badge-err">not configured</span>{{end}}</div>
   {{if .Account.ClientID}}<div class="row"><span class="label">Client ID</span><span class="cid" title="{{.Account.ClientID}}">{{.Account.ClientIDPrefix}}<span class="cid-suffix">{{.Account.ClientIDSuffix}}</span></span></div>{{end}}
   <div class="row"><span class="label">Signed in</span>{{if .Account.HasToken}}<span class="badge badge-ok">yes</span>{{else}}<span class="badge badge-warn">no</span>{{end}}</div>
-  {{if not .Account.HasCredentials}}<div class="hint">Run <code>gpsync setup</code> or <code>gpsync import-rclone</code> once from a terminal to configure this -- gpsync-tray doesn't run the Google consent flow itself yet.</div>{{end}}
+  {{if not .Account.HasCredentials}}<div class="hint"><a href="/signin">Sign in</a> to import credentials from an rclone remote, or to see what setting up from scratch involves.</div>{{end}}
 </div>
 <form method="post" action="/settings" id="settings-form" onsubmit="document.getElementById('save-btn').disabled=true; document.getElementById('save-btn').textContent='Saving…';">
   <div class="card">

@@ -234,6 +234,24 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(page))
 	})
+	mux.HandleFunc("/signin", func(w http.ResponseWriter, r *http.Request) {
+		cfg := wc.Config()
+		page, err := renderSignInPage(db, cfg, appName,
+			r.URL.Query().Get("imported"), r.URL.Query().Get("error"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(page))
+	})
+	mux.HandleFunc("/signin/import-rclone", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleSignInImportRclone(w, r, db, wc)
+	})
 	mux.HandleFunc("/backup/create", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
