@@ -255,6 +255,20 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		}
 		handleSignInImportRclone(w, r, db, wc)
 	})
+	mux.HandleFunc("/browse/recheck", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleBrowseRecheck(w, r, db)
+	})
+	mux.HandleFunc("/browse/forget", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleBrowseForget(w, r, db)
+	})
 	mux.HandleFunc("/sync-folder", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)

@@ -19,6 +19,7 @@ import (
 const browseLimit = 200
 
 type browseRowData struct {
+	SHA256   string
 	Path     string
 	Filename string
 	Size     string
@@ -93,10 +94,11 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
     <thead><tr>
       {{range .Columns}}<th{{if .Center}} class="center"{{end}}><a href="{{.Href}}"{{if .Active}} class="active"{{end}}>{{.Label}}{{.Indicator}}</a></th>{{end}}
       {{if .ShowError}}<th>Error</th>{{end}}
+      <th class="center">Actions</th>
     </tr></thead>
     <tbody>
-      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}</tr>{{end}}
-      {{if not .Rows}}<tr><td colspan="7">No matching files.</td></tr>{{end}}
+      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="return" value="/browse?type={{$.Kind}}&q={{$.Query}}"><button type="submit" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="return" value="/browse?type={{$.Kind}}&q={{$.Query}}"><button type="submit" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></td></tr>{{end}}
+      {{if not .Rows}}<tr><td colspan="8">No matching files.</td></tr>{{end}}
     </tbody>
   </table>
   </div>
@@ -211,6 +213,7 @@ func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, so
 			captured = time.Unix(int64(u.CapturedAt.Float64), 0).Format("2006-01-02")
 		}
 		rows[i] = browseRowData{
+			SHA256:   u.SHA256,
 			Path:     pathx.DisplayDir(u.FirstSourcePath),
 			Filename: pathx.DisplayName(u.FirstSourcePath),
 			Size:     humanBytes(u.Size),
