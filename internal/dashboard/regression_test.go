@@ -22,7 +22,7 @@ func TestRenderBrowsePage_OffsetZero_PrevLinkAbsent(t *testing.T) {
 	db := openTestDB(t)
 	mustNoErr(t, db.EnsurePending("h1", 10, "image/jpeg", "/lib/a.jpg", nil))
 
-	page, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false)
+	page, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestRenderOriginalsPage_NextIndexWrapsToZero(t *testing.T) {
 	// parent sibling), so it stays in needs_review for this test to see.
 	mustNoErr(t, db.EnsureNeedsReview("hash-only", 50, "image/jpeg", filepath.Join(t.TempDir(), "originals", "solo.jpg"), nil))
 
-	page, err := renderOriginalsPage(db, config.Defaults(), 0, "")
+	page, err := renderOriginalsPage(db, config.Defaults(), 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +467,7 @@ func TestRenderStatisticsPage_ByMediaType(t *testing.T) {
 	mustNoErr(t, db.MarkUploaded("p-done", "m1", ""))
 	mustNoErr(t, db.EnsurePending("v-todo", 8000, "video/mp4", "/lib/c.mp4", nil))
 
-	page, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily)
+	page, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,7 @@ func TestRenderOriginalsPage_AlreadyUploadedSection(t *testing.T) {
 	mustNoErr(t, db.UpsertFileSeen(path, "hash-up", 0, 250))
 	mustNoErr(t, db.MarkUploaded("hash-up", "media-123", ""))
 
-	page, err := renderOriginalsPage(db, config.Defaults(), 0, "")
+	page, err := renderOriginalsPage(db, config.Defaults(), 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestRenderOriginalsPage_NothingUploadedFromOriginals_SectionAbsent(t *testi
 	mustNoErr(t, db.UpsertFileSeen("/lib/2024/normal.jpg", "hash-normal", 0, 10))
 	mustNoErr(t, db.MarkUploaded("hash-normal", "media-1", ""))
 
-	page, err := renderOriginalsPage(db, config.Defaults(), 0, "")
+	page, err := renderOriginalsPage(db, config.Defaults(), 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +593,7 @@ func TestRenderBrowsePage_UploadedNeedsReviewIgnored_Render(t *testing.T) {
 		{engine.FileListIgnored, "ignored-file.jpg", "<title>Ignored —"},
 	}
 	for _, c := range cases {
-		page, err := renderBrowsePage(db, c.kind, "", "", false, 0, config.ThemeDark, false)
+		page, err := renderBrowsePage(db, c.kind, "", "", false, 0, config.ThemeDark, false, nil, "", "")
 		if err != nil {
 			t.Fatalf("%s: %v", c.kind, err)
 		}
@@ -725,7 +725,7 @@ func TestRenderStatisticsPage_ActivityChartsAndSelector(t *testing.T) {
 		{engine.ActivityMonthly, 12, "Last 12 months."},
 	}
 	for _, c := range cases {
-		page, err := renderStatisticsPage(db, config.ThemeDark, false, c.gran)
+		page, err := renderStatisticsPage(db, config.ThemeDark, false, c.gran, "", "")
 		if err != nil {
 			t.Fatalf("%s: %v", c.gran, err)
 		}
@@ -776,7 +776,7 @@ func TestRenderStatisticsPage_BackupProgressCard(t *testing.T) {
 	mustNoErr(t, db.MarkUploaded("h-done", "media-a", ""))
 	mustNoErr(t, db.EnsurePending("h-todo", 4096, "image/jpeg", "/lib/b.jpg", nil))
 
-	page, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily)
+	page, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +800,7 @@ func TestRenderStatisticsPage_BackupProgress_NoThroughput_ShowsNoEstimate(t *tes
 	db := openTestDB(t)
 	mustNoErr(t, db.EnsurePending("h-only", 4096, "image/jpeg", "/lib/c.jpg", nil))
 
-	page, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily)
+	page, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -998,11 +998,11 @@ func TestPages_UseKBMBGBLabels(t *testing.T) {
 	mustNoErr(t, db.EnsurePending("h-video", 5<<30, "video/mp4", "/lib/b.mp4", nil))
 	mustNoErr(t, db.MarkUploaded("h-photo", "m1", ""))
 
-	stats, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily)
+	stats, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	browse, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false)
+	browse, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

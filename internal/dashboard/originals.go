@@ -40,6 +40,12 @@ type originalsPageData struct {
 	// out from an originals folder BEFORE this review workflow existed).
 	UploadedFromOriginals []originalsUploadedItem
 	UploadedTotalStr      string
+
+	// CleanableOriginals is how many queued rows CleanOriginals would move
+	// into review, from a dry run on every page load -- so the button says
+	// what it would do before it is pressed. Message reports a pass.
+	CleanableOriginals int
+	Message            string
 }
 
 type originalsUploadedItem struct {
@@ -110,6 +116,17 @@ var originalsTmpl = template.Must(template.New("originals").Parse(`
 </form>
 {{end}}
 {{if .UploadedFromOriginals}}
+{{if .Message}}<div class="banner banner-ok">{{.Message}}</div>{{end}}
+{{if .CleanableOriginals}}
+<div class="card">
+  <h2>Queued from an "originals" folder</h2>
+  <div class="hint">{{.CleanableOriginals}} file(s) sitting in the upload queue came from an <code>originals</code> folder, queued by a scan that ran before this review step existed. Moving them here lets you decide each one instead of uploading pre-edit copies. Nothing is uploaded or deleted.</div>
+  <form method="post" action="/originals/clean">
+    <button type="submit">Move {{.CleanableOriginals}} file(s) into review</button>
+  </form>
+</div>
+{{end}}
+
 <div class="card">
   <h2>Already uploaded from an "originals" folder</h2>
   <div class="hint" style="margin-bottom:0.8rem;">Sent to Google Photos before this review workflow existed -- nothing gpsync can do about these automatically (Google Photos has no API to find/delete a specific upload by path), so this is a lead list to check by hand. {{.UploadedTotalStr}} total.</div>
@@ -124,8 +141,14 @@ var originalsTmpl = template.Must(template.New("originals").Parse(`
 // fresh into db.NeedsReviewItems() on every request (never cached) --
 // exactly renderDuplicatesPage's own discipline, so a just-resolved item
 // is gone from the list on the very next request.
-func renderOriginalsPage(db *statedb.DB, cfg config.Config, index int, errMsg string) (string, error) {
-	data := originalsPageData{ErrorMessage: errMsg}
+func renderOriginalsPage(db *statedb.DB, cfg config.Config, index int, errMsg, msg string) (string, error) {
+	data := originalsPageData{ErrorMessage: errMsg, Message: msg}
+	// Dry run, so the button can say how many rows it would move before
+	// anyone presses it. Best-effort: one card's count must not stop the
+	// page rendering.
+	if dry, err := engine.CleanOriginals(db, false); err == nil {
+		data.CleanableOriginals = dry.Matched
+	}
 
 	// Resolves the unambiguous cases (an immediate-parent sibling, or no
 	// match anywhere at all) BEFORE listing, so the review queue only ever

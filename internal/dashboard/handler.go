@@ -35,6 +35,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 	// must never share lockout state.
 	loginAttempts := newLoginAttemptTracker()
 	consent := newConsentTracker()
+	markJob := newMarkSyncedJob()
 
 	cfg := wc.Config()
 
@@ -199,7 +200,8 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		// client-side state to get out of sync with what's displayed, and
 		// each view is a shareable, bookmarkable URL.
 		activity := engine.ParseActivityGranularity(r.URL.Query().Get("activity"))
-		page, err := renderStatisticsPage(db, wc.Config().Theme, wc.Config().DashboardAuthEnabled, activity)
+		page, err := renderStatisticsPage(db, wc.Config().Theme, wc.Config().DashboardAuthEnabled, activity,
+			r.URL.Query().Get("fixed"), r.URL.Query().Get("error"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -216,7 +218,9 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		offset, _ := strconv.Atoi(q.Get("offset"))
 		sortKey := engine.SortKey(q.Get("sort"))
 		sortDesc := q.Get("dir") == "desc"
-		page, err := renderBrowsePage(db, kind, q.Get("q"), sortKey, sortDesc, offset, wc.Config().Theme, wc.Config().DashboardAuthEnabled)
+		bcfg := wc.Config()
+		page, err := renderBrowsePage(db, kind, q.Get("q"), sortKey, sortDesc, offset, bcfg.Theme, bcfg.DashboardAuthEnabled,
+			bcfg.SourceFolders, q.Get("synced"), q.Get("error"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -252,6 +256,47 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 			return
 		}
 		handleSignInImportRclone(w, r, db, wc)
+	})
+	mux.HandleFunc("/mark-synced", func(w http.ResponseWriter, r *http.Request) {
+		handleMarkSynced(w, r, db, wc, markJob)
+	})
+	mux.HandleFunc("/mark-synced/status", func(w http.ResponseWriter, r *http.Request) {
+		handleMarkSyncedStatus(w, r, markJob)
+	})
+	mux.HandleFunc("/originals/clean", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleCleanOriginals(w, r, db)
+	})
+	mux.HandleFunc("/statistics/fix-dates", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleFixDates(w, r, db)
+	})
+	mux.HandleFunc("/browse/recheck", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleBrowseRecheck(w, r, db)
+	})
+	mux.HandleFunc("/browse/forget", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleBrowseForget(w, r, db)
+	})
+	mux.HandleFunc("/sync-folder", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleSyncFolder(w, r, wc)
 	})
 	mux.HandleFunc("/signin/upload", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -322,7 +367,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 	mux.HandleFunc("/originals", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		index, _ := strconv.Atoi(q.Get("i"))
-		page, err := renderOriginalsPage(db, wc.Config(), index, q.Get("error"))
+		page, err := renderOriginalsPage(db, wc.Config(), index, q.Get("error"), q.Get("cleaned"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

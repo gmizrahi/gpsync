@@ -19,6 +19,7 @@ import (
 const browseLimit = 200
 
 type browseRowData struct {
+	SHA256   string
 	Path     string
 	Filename string
 	Size     string
@@ -50,6 +51,13 @@ type browsePageData struct {
 	ShowingTo   int
 	PrevLink    string
 	NextLink    string
+
+	// SourceFolders backs the "sync one folder now" control. Only
+	// configured folders are offered, and the handler re-checks the
+	// submitted value -- a select is a convenience, not a guarantee.
+	SourceFolders []string
+	Message       string
+	ErrorMessage  string
 }
 
 // browseTmpl mirrors settingsTmpl's reasoning: html/template, not string
@@ -64,6 +72,23 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
   <a href="/browse?type=needs_review&q={{.Query}}" {{if eq .Kind "needs_review"}}class="active"{{end}}>Needs review</a>
   <a href="/browse?type=ignored&q={{.Query}}" {{if eq .Kind "ignored"}}class="active"{{end}}>Ignored</a>
 </div>
+{{if .Message}}<div class="banner banner-ok">{{.Message}}</div>{{end}}
+{{if .ErrorMessage}}<div class="banner banner-err">{{.ErrorMessage}}</div>{{end}}
+{{if .SourceFolders}}
+<form class="search-row" method="post" action="/sync-folder">
+  <input type="hidden" name="tab" value="{{.Kind}}">
+  <select name="folder">
+    {{range .SourceFolders}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  <button type="submit">Sync this folder now</button>
+</form>
+<form class="search-row" method="get" action="/mark-synced">
+  <select name="folder">
+    {{range .SourceFolders}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  <button type="submit" title="Record these files as already in Google Photos, without uploading">Mark as already synced…</button>
+</form>
+{{end}}
 <form class="search-row" method="get" action="/browse">
   <input type="hidden" name="type" value="{{.Kind}}">
   <input type="text" name="q" value="{{.Query}}" placeholder="Filter by path or hash...">
@@ -75,10 +100,11 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
     <thead><tr>
       {{range .Columns}}<th{{if .Center}} class="center"{{end}}><a href="{{.Href}}"{{if .Active}} class="active"{{end}}>{{.Label}}{{.Indicator}}</a></th>{{end}}
       {{if .ShowError}}<th>Error</th>{{end}}
+      <th class="center">Actions</th>
     </tr></thead>
     <tbody>
-      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}</tr>{{end}}
-      {{if not .Rows}}<tr><td colspan="7">No matching files.</td></tr>{{end}}
+      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></td></tr>{{end}}
+      {{if not .Rows}}<tr><td colspan="8">No matching files.</td></tr>{{end}}
     </tbody>
   </table>
   </div>
@@ -174,7 +200,7 @@ func buildSortColumns(kind engine.FileListKind, query string, sortKey engine.Sor
 	return cols
 }
 
-func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, offset int, theme string, authEnabled bool) (string, error) {
+func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, offset int, theme string, authEnabled bool, sourceFolders []string, msg, errMsg string) (string, error) {
 	res, err := engine.BrowseFiles(db, engine.BrowseQuery{
 		Kind: kind, Search: query, Sort: sortKey, SortDesc: sortDesc, Offset: offset, Limit: browseLimit,
 	})
@@ -193,6 +219,7 @@ func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, so
 			captured = time.Unix(int64(u.CapturedAt.Float64), 0).Format("2006-01-02")
 		}
 		rows[i] = browseRowData{
+			SHA256:   u.SHA256,
 			Path:     pathx.DisplayDir(u.FirstSourcePath),
 			Filename: pathx.DisplayName(u.FirstSourcePath),
 			Size:     humanBytes(u.Size),
@@ -210,6 +237,10 @@ func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, so
 		Columns:   buildSortColumns(kind, query, sortKey, sortDesc),
 		Rows:      rows,
 		Total:     res.Total,
+
+		SourceFolders: sourceFolders,
+		Message:       msg,
+		ErrorMessage:  errMsg,
 	}
 	if res.Total > 0 {
 		data.ShowingFrom = res.Offset + 1

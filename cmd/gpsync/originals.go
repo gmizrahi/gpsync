@@ -29,25 +29,8 @@ type cleanOriginalsSummary struct {
 // match. Split out from the cobra command so the decision logic is
 // testable without a terminal, matching fixDates' own precedent.
 func cleanOriginals(db *statedb.DB, commit bool) (cleanOriginalsSummary, error) {
-	var sum cleanOriginalsSummary
-	rows, err := db.OriginalsFolderRowsPendingOrFailed()
-	if err != nil {
-		return sum, err
-	}
-	for _, r := range rows {
-		if !scanner.IsInOriginalsFolder(r.FirstSourcePath) {
-			continue
-		}
-		sum.matched++
-		sum.items = append(sum.items, r)
-		if !commit {
-			continue
-		}
-		if err := db.MigrateToNeedsReview(r.SHA256); err != nil {
-			return sum, fmt.Errorf("migrating %s to needs_review: %w", r.FirstSourcePath, err)
-		}
-	}
-	return sum, nil
+	sum, err := engine.CleanOriginals(db, commit)
+	return cleanOriginalsSummary{matched: sum.Matched, items: sum.Items}, err
 }
 
 func cleanOriginalsCmd() *cobra.Command {

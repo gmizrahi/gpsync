@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"time"
 
-	"github.com/gmizrahi/gpsync/internal/scanner"
+	"github.com/gmizrahi/gpsync/internal/engine"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 	"github.com/spf13/cobra"
 )
@@ -43,30 +42,8 @@ type fixDatesSummary struct {
 // Split out from the cobra command so the decision logic is testable
 // without a terminal, matching recheckFailures' own precedent.
 func fixDates(db *statedb.DB, dryRun bool) (fixDatesSummary, error) {
-	var sum fixDatesSummary
-	rows, err := db.AllCaptureDates()
-	if err != nil {
-		return sum, err
-	}
-	for _, r := range rows {
-		t, ok := scanner.DateFromPath(r.Path)
-		if !ok {
-			sum.unchanged++
-			continue
-		}
-		if r.CapturedAt.Valid && time.Unix(int64(r.CapturedAt.Float64), 0).UTC().Year() == t.Year() {
-			sum.unchanged++
-			continue
-		}
-		sum.fixed++
-		if dryRun {
-			continue
-		}
-		if err := db.UpdateCapturedAt(r.SHA256, float64(t.Unix())); err != nil {
-			return sum, fmt.Errorf("updating capture date for %s: %w", r.Path, err)
-		}
-	}
-	return sum, nil
+	sum, err := engine.FixDates(db, dryRun)
+	return fixDatesSummary{fixed: sum.Fixed, unchanged: sum.Unchanged}, err
 }
 
 func fixDatesCmd() *cobra.Command {

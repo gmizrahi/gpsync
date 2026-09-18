@@ -71,6 +71,8 @@ type fakeController struct {
 	retryRequested   bool
 	cancelledPath    string
 	cancelResult     bool
+	syncedFolder     string
+	syncErr          error
 	setConfigCalls   []config.Config
 }
 
@@ -96,6 +98,10 @@ func (f *fakeController) InFlightFiles() map[string]uploader.InFlightFile { retu
 func (f *fakeController) RecentEvents() []uploader.ProgressEvent          { return f.recent }
 func (f *fakeController) CurrentBackoff() *uploader.BackoffStatus         { return f.backoff }
 func (f *fakeController) RequestRetryNow()                                { f.retryRequested = true }
+func (f *fakeController) SyncFolderNow(folder string) error {
+	f.syncedFolder = folder
+	return f.syncErr
+}
 func (f *fakeController) CancelFile(path string) bool {
 	f.cancelledPath = path
 	return f.cancelResult
