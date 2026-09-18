@@ -36,8 +36,17 @@ func TestFolderIsConfigured(t *testing.T) {
 		{"   ", false},
 		{filepath.Join("C:", "Photos", "..", "Windows"), false},
 	} {
-		if got := folderIsConfigured(cfg, tc.folder); got != tc.want {
+		clean, got := folderIsConfigured(cfg, tc.folder)
+		if got != tc.want {
 			t.Errorf("folderIsConfigured(%q) = %v, want %v", tc.folder, got, tc.want)
+		}
+		// The cleaned path is what callers pass on, so it must be the
+		// value that was actually checked -- not the raw input.
+		if got && clean != filepath.Clean(tc.folder) {
+			t.Errorf("folderIsConfigured(%q) returned %q, want the cleaned path", tc.folder, clean)
+		}
+		if !got && clean != "" {
+			t.Errorf("folderIsConfigured(%q) returned %q on refusal, want empty", tc.folder, clean)
 		}
 	}
 }
@@ -124,7 +133,13 @@ func TestSyncFolder_ReturnTargetCannotLeaveTheSite(t *testing.T) {
 	ctrl.cfg.SourceFolders = []string{filepath.Join("C:", "Photos")}
 
 	srv := newTestServer(t, db, ctrl, Options{AppName: "GPhotos Sync"})
-	for _, back := range []string{"https://evil.example/x", "//evil.example/x", "evil.example"} {
+	// "/\\evil" and "/\tevil" are the cases the hand-rolled check missed:
+	// browsers normalise the first to protocol-relative and strip the tab
+	// from the second before parsing.
+	for _, back := range []string{
+		"https://evil.example/x", "//evil.example/x", "evil.example",
+		"/\\evil.example/x", "/\tevil.example/x", "/\nevil.example",
+	} {
 		resp, err := newTestClient(t).PostForm(srv.URL+"/sync-folder", url.Values{
 			"folder": {filepath.Join("C:", "Photos")},
 			"return": {back},

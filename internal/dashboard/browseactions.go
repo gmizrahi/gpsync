@@ -12,13 +12,13 @@ import (
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
 
-// browseReturn confines the form's return target to this site. The value
-// comes from the request, so it must never become an open redirect.
+// browseReturn confines the form's return target to this site.
+//
+// Shares safeReturnTo rather than checking here: a local version of this
+// missed a leading "/\\" (which browsers normalise to protocol-relative)
+// and embedded control characters (which browsers strip before parsing).
 func browseReturn(raw string) string {
-	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
-		return "/browse?type=pending"
-	}
-	return raw
+	return safeReturnTo(raw, "/browse?type=pending")
 }
 
 func redirectBrowse(w http.ResponseWriter, r *http.Request, back, msg, errMsg string) {

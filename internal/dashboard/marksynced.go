@@ -139,13 +139,14 @@ func handleMarkSynced(w http.ResponseWriter, r *http.Request, db *statedb.DB, wc
 
 	// Same guard as /sync-folder: unchecked, this would record files from
 	// anywhere on the machine as backed up.
-	if !folderIsConfigured(cfg, folder) {
+	clean, ok := folderIsConfigured(cfg, folder)
+	if !ok {
 		back("", "that folder is not inside any configured source folder")
 		return
 	}
 
 	if r.Method == http.MethodGet {
-		page, err := renderMarkSyncedConfirm(db, cfg, folder)
+		page, err := renderMarkSyncedConfirm(db, cfg, clean)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -161,11 +162,11 @@ func handleMarkSynced(w http.ResponseWriter, r *http.Request, db *statedb.DB, wc
 		back("", "type "+markSyncedPhrase+" exactly to confirm")
 		return
 	}
-	if err := job.start(db, folder); err != nil {
+	if err := job.start(db, clean); err != nil {
 		back("", err.Error())
 		return
 	}
-	back("Marking "+filepath.Base(folder)+" as already synced. This hashes every file, so it takes a while.", "")
+	back("Marking "+filepath.Base(clean)+" as already synced. This hashes every file, so it takes a while.", "")
 }
 
 func handleMarkSyncedStatus(w http.ResponseWriter, _ *http.Request, job *markSyncedJob) {
