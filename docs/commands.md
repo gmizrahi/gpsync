@@ -225,7 +225,7 @@ gpsync recheck --all           Same as --missing --unsupported --retry
 
 Check the ledger for problems and repair the safe ones.
 
-Checks for: - a run still marked active after a crash - files waiting in the retry queue - files confirmed missing from disk - originals-review items that can be resolved automatically - permanent failures
+Checks for: - a run still marked active after a crash - files waiting in the retry queue - files confirmed missing from disk - originals-review items that can be resolved automatically - permanent failures - queued files whose path now holds different content, because it was edited
 
 Without --fix it only reports, and is safe to run at any time. --fix repairs what needs no decision; for everything else the report names the command to use.
 

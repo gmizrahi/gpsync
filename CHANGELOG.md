@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1]
+
+A bug fix: a photo edited in place could be uploaded twice, with the ledger
+then claiming the original had been uploaded when it never was.
+
+### Fixed
+
+- **An edited file no longer leaves a ledger row that uploads the wrong
+  bytes.** Editing a photo in place -- a crop, a rotate, an exposure fix --
+  changes its hash but keeps its path, which left the old hash's row still
+  naming that path. The uploader only checks that the path exists, so that row
+  would send the *edited* content under the *original* hash: the photo uploaded
+  twice, and the record of the original marked uploaded when it never was.
+  Every "is it still there" check was path-based, and the path was still there.
+  (#22)
+  - **Re-check now compares content, not existence.** A row whose path holds
+    different content is reported as replaced and flagged missing, instead of
+    "back on disk".
+  - **`gpsync doctor` gained an invariant for it.** Queued rows pointing at a
+    path that now holds different content are reported and, under `--fix`,
+    forgotten -- which is what stops the wrong-bytes upload. Already-uploaded
+    rows are left alone: that content really was sent, and the row is history
+    worth keeping.
+
 ## [0.3.0]
 
 Everything that needed a terminal can now be done from the dashboard, and
@@ -194,7 +218,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/gmizrahi/gpsync/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/gmizrahi/gpsync/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gmizrahi/gpsync/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gmizrahi/gpsync/releases/tag/v0.1.0
