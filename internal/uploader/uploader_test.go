@@ -3059,7 +3059,7 @@ func TestUploader_Run_SkipSignal_CutsAnInProgressWaitShortImmediately(t *testing
 // looks exactly like the button doing nothing. This calls Request()
 // BEFORE Run() (and therefore before any watcher exists at all) to prove
 // the fix: the very first wait must still be cut short immediately, not
-// left to run its real ~5s duration.
+// left to run its full duration (the schedule's rung 0, five minutes).
 //
 // throttleFirst: 1 (not throttleAll) -- the file is throttled exactly
 // once, cut short by the pre-existing skip request, then SUCCEEDS on
@@ -3071,6 +3071,32 @@ func TestUploader_Run_SkipSignal_RequestBeforeAnyWaitIsStillHonoredImmediately(t
 	origTick := backoffTickInterval
 	backoffTickInterval = 5 * time.Millisecond
 	t.Cleanup(func() { backoffTickInterval = origTick })
+
+	// The verdict, rather than a stopwatch. waitFn already reports whether
+	// the pause ran its full course or was cancelled partway, which is
+	// exactly the distinction this test is about, so the real
+	// implementation is WRAPPED rather than replaced: the watcher
+	// goroutine, the context cancel and the select it lands on all still
+	// run for real.
+	//
+	// The rung is capped at 30s purely to bound the BROKEN case. A skip
+	// that is honored cancels the wait as soon as the watcher goroutine
+	// runs, so the correct path never waits at all -- and is allowed to
+	// take as long as it likes to get there, which is what removes the
+	// load-sensitive deadline this test used to fail on. A skip that is
+	// silently missed sits out the cap and fails on completedFullWait
+	// below; without the cap that would be the schedule's real rung 0,
+	// which is five MINUTES.
+	var completedFullWait bool
+	origWait := waitFn
+	waitFn = func(ctx context.Context, total time.Duration, onTick func(remaining time.Duration)) bool {
+		if total > 30*time.Second {
+			total = 30 * time.Second
+		}
+		completedFullWait = origWait(ctx, total, onTick)
+		return completedFullWait
+	}
+	t.Cleanup(func() { waitFn = origWait })
 
 	ts := &throttlingServer{throttleFirst: 1}
 	ts.serve(t)
@@ -3094,7 +3120,6 @@ func TestUploader_Run_SkipSignal_RequestBeforeAnyWaitIsStillHonoredImmediately(t
 		skip:        skip,
 	}
 
-	start := time.Now()
 	done := make(chan struct{})
 	var stats Stats
 	var runErr error
@@ -3103,16 +3128,16 @@ func TestUploader_Run_SkipSignal_RequestBeforeAnyWaitIsStillHonoredImmediately(t
 		close(done)
 	}()
 
+	// Generous on purpose: this is a backstop against a hang, not the
+	// assertion. The assertion is completedFullWait, which does not care how
+	// busy the machine is.
 	select {
 	case <-done:
-	case <-time.After(4 * time.Second):
-		t.Fatal("Run() did not return within 4s -- a pre-existing skip request must still cut the first wait short (rung 0 is a real 5s otherwise)")
+	case <-time.After(2 * time.Minute):
+		t.Fatal("Run() never returned")
 	}
-	// 3s, not 1s: the bound only has to sit clearly below the real 5s rung.
-	// A tighter one measures how busy the machine is, and failed at 1.14s on
-	// a Windows runner where this package takes 278s against 18s locally.
-	if elapsed := time.Since(start); elapsed > 3*time.Second {
-		t.Errorf("Run() took %v, want well under the real 5s rung -- the pre-existing skip request should have been honored on the very first wait, not silently missed", elapsed)
+	if completedFullWait {
+		t.Error("the backoff pause ran its full course -- a skip request already pending before Run() started must cut the very first wait short, not be silently missed")
 	}
 
 	if runErr != nil {
