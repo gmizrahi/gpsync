@@ -106,20 +106,96 @@ jobs:
 
       # The build job wrote checksums for the archives; the installer did not
       # exist yet at that point, so regenerate over everything published.
+      #
+      # The asset list is explicit rather than a `gpsync-*` glob: dist/ also
+      # holds the raw gpsync-tray.exe that the zip is built from, which that
+      # glob matched, so shipped checksums files listed a file that was never
+      # a release asset.
       - name: Checksums
         working-directory: dist
         run: |
+          set -euo pipefail
           rm -f checksums.txt
-          sha256sum gpsync-* > checksums.txt
+          ls -1 gpsync-*.tar.gz gpsync-*.zip gpsync-setup-*.exe > assets.txt
+          echo "Publishing these assets:"
+          cat assets.txt
+          sha256sum $(cat assets.txt) > checksums.txt
           cat checksums.txt
 
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      # Published with the gh CLI rather than a third-party action, matching
+      # ci.yml's own reasoning for installing golangci-lint directly: fewer
+      # moving parts in a workflow that holds contents:write.
+      #
+      # The action this replaces logged every asset as uploaded and then
+      # failed while finalising, leaving a DIFFERENT partial set behind on
+      # each attempt -- a half-populated draft that looked plausible. Create
+      # and upload are separate steps here, and the verify step below is what
+      # makes a partial upload fail loudly instead of shipping quietly.
+      - name: Publish draft release
         if: startsWith(github.ref, 'refs/tags/')
-        with:
-          draft: true
-          generate_release_notes: true
-          files: |
-            dist/gpsync-*.tar.gz
-            dist/gpsync-*.zip
-            dist/gpsync-setup-*.exe
-            dist/checksums.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd dist
+          mapfile -t assets < <(cat assets.txt)
+          assets+=(checksums.txt)
+
+          # Idempotent: a re-run after a partial failure reuses the draft
+          # rather than colliding with it.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; reusing it."
+          else
+            gh release create "$TAG" --draft --generate-notes --title "$TAG"
+          fi
+
+          # --clobber so a retry replaces a half-uploaded asset instead of
+          # erroring on the name already being taken.
+          for a in "${assets[@]}"; do
+            echo "Uploading $a"
+            gh release upload "$TAG" "$a" --clobber
+          done
+
+      # The whole point of this job: the release either carries every asset
+      # or the run fails. A missing or zero-byte asset is caught here rather
+      # than by someone downloading it later.
+      - name: Verify the published asset set
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd dist
+          mapfile -t expected < <(cat assets.txt)
+          expected+=(checksums.txt)
+
+          # A draft is not visible via releases/tags/<tag>, only in the list.
+          gh api --paginate repos/${{ github.repository }}/releases \
+            --jq ".[] | select(.tag_name==\"$TAG\") | .assets[] | \"\(.name) \(.size) \(.state)\"" > published.txt
+          echo "Published:"; cat published.txt
+
+          rc=0
+          for a in "${expected[@]}"; do
+            line=$(grep -F -- "$a " published.txt || true)
+            if [ -z "$line" ]; then
+              echo "::error::asset missing from the release: $a"; rc=1; continue
+            fi
+            size=$(printf '%s' "$line" | awk '{print $2}')
+            state=$(printf '%s' "$line" | awk '{print $3}')
+            if [ "$state" != "uploaded" ]; then
+              echo "::error::asset $a is in state '$state', not 'uploaded'"; rc=1
+            fi
+            if [ "${size:-0}" -le 0 ]; then
+              echo "::error::asset $a published with size $size"; rc=1
+            fi
+          done
+
+          extra=$(awk '{print $1}' published.txt | grep -vxF -f <(printf '%s\n' "${expected[@]}") || true)
+          if [ -n "$extra" ]; then
+            echo "::error::unexpected assets on the release:"; printf '%s\n' "$extra"; rc=1
+          fi
+
+          [ "$rc" -eq 0 ] || { echo "::error::the release asset set is incomplete -- see above"; exit 1; }
+          echo "All ${#expected[@]} assets present, non-empty, and uploaded."
