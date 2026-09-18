@@ -224,8 +224,16 @@ func TestRunFolderCycle_UploadStartsWithoutWaitingForScanToFinish(t *testing.T) 
 	// below, so wait for it to actually finish (evidenced by the decoy
 	// showing up as pending too) before this test function returns and
 	// t.Cleanup tears down the temp dir and closes db out from under it.
+	//
+	// Two minutes, not five seconds. What is being waited on is a 2 GB
+	// hash, which is disk-bound and has no upper bound on a loaded
+	// machine: on a Windows runner where this package took 982s against a
+	// normal 404s, five seconds expired while the scan was still reading,
+	// the temp dir was deleted with the file still open, and Windows
+	// refused -- failing a test that had itself passed. The wait costs
+	// nothing when the scan is quick, which is every other time.
 	t.Cleanup(func() {
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(2 * time.Minute)
 		for time.Now().Before(deadline) {
 			pending, perr := db.ListPendingUnder([]string{dir})
 			if perr == nil && len(pending) >= 2 {
@@ -233,6 +241,9 @@ func TestRunFolderCycle_UploadStartsWithoutWaitingForScanToFinish(t *testing.T) 
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
+		// Say so rather than letting it surface as an unrelated-looking
+		// "file in use by another process" from TempDir's own cleanup.
+		t.Error("the background scan had not finished after 2m; the temp dir is about to be deleted with files still open")
 	})
 
 	if err == nil {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gmizrahi/gpsync/internal/config"
 )
@@ -61,6 +62,13 @@ func TestTrayRunningNotice_DashboardReachable_ReturnsNotice(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.DashboardPort = srv.Listener.Addr().(*net.TCPAddr).Port
 
+	// The production 300ms is tuned for a person waiting at a terminal, not
+	// for a CI runner three times slower than usual -- where even this
+	// loopback request to a server in THIS process has missed it, and the
+	// probe then reported "not running". What is under test is that a real
+	// listening server is detected, not how fast the machine is.
+	withProbeTimeout(t, 10*time.Second)
+
 	if notice := trayRunningNotice(cfg); notice == "" {
 		t.Error("trayRunningNotice = empty, want a notice when the dashboard IS reachable")
 	}
@@ -95,4 +103,12 @@ func TestTrayRunningNotice_NothingListening_ReturnsEmpty(t *testing.T) {
 	if notice := trayRunningNotice(cfg); notice != "" {
 		t.Errorf("trayRunningNotice = %q, want empty when nothing is listening", notice)
 	}
+}
+
+// withProbeTimeout raises trayRunningNotice's probe timeout for one test.
+func withProbeTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := trayProbeTimeout
+	trayProbeTimeout = d
+	t.Cleanup(func() { trayProbeTimeout = prev })
 }

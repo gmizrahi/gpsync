@@ -46,21 +46,27 @@ func trayDashboardBase(cfg config.Config) string {
 // trayRunningNotice checks whether gpsync-tray's dashboard is currently
 // reachable and, if so, returns a one-line note to print, so a command run
 // alongside the tray says so rather than appearing to act alone. A short
-// timeout (not
-// the default client's none-at-all) keeps this from noticeably delaying a
-// command in the unusual case of something silently dropping the
+// timeout (not the default client's none-at-all) keeps this from noticeably
+// delaying a command in the unusual case of something silently dropping the
 // connection attempt rather than the near-instant "connection refused" an
 // ordinary not-running gpsync-tray gets.
 //
 // ANY response at all -- even a 401 from Basic Auth -- is treated as
 // "running": this only needs to prove something is listening and
 // answering like gpsync-tray's own dashboard, not read its body.
+// trayProbeTimeout is how long that probe waits. A var, not a constant, so
+// tests can raise it: 300ms is chosen for a person at a terminal, and on a
+// loaded CI runner even a loopback request to a server in the same process
+// can miss it, which made the "dashboard IS reachable" test fail for
+// reasons that had nothing to do with the code.
+var trayProbeTimeout = 300 * time.Millisecond
+
 func trayRunningNotice(cfg config.Config) string {
 	url := trayDashboardURL(cfg)
 	if url == "" {
 		return ""
 	}
-	client := &http.Client{Timeout: 300 * time.Millisecond}
+	client := &http.Client{Timeout: trayProbeTimeout}
 	resp, err := client.Get(url)
 	if err != nil {
 		return ""
