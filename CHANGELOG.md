@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0]
+
+Everything that needed a terminal can now be done from the dashboard, and
+signing in no longer needs one at all.
+
+### Added
+
+- **Sign in from the dashboard.** A new page imports an existing rclone Google
+  Photos remote, accepts a `client_secret.json` upload, or runs Google's
+  consent flow — so installing the tray and never opening a shell is now a
+  complete path. Previously the Account card could only report that you were
+  not signed in. (#15, #16, closes #14)
+- **Sync one folder on demand**, from Browse. Queued behind whatever the watch
+  engine is already doing, and the confirmation says so. (#19)
+- **Re-check and Forget, per file**, on every Browse row. Re-check reports
+  whether a file is still on disk; Forget drops the ledger entry and leaves the
+  file alone. (#19)
+- **Fix drifted capture dates** from Statistics, where the wrong years are
+  visible. The button reports how many it would correct before you press it.
+  (#19)
+- **Move queued originals-folder files into review** from the Originals page,
+  instead of `gpsync clean-originals`. (#19)
+- **Mark a folder as already synced** from the dashboard, behind a typed
+  confirmation — it tells gpsync never to upload those files, so it is gated
+  like a restore. (#19)
+- **`gpsync stats`** — the Statistics view as a CLI command, for Linux and
+  macOS where there is no tray. (#19, closes #18)
+
+### Fixed
+
+- **Releases no longer publish a partial asset set.** Cutting v0.2.0 failed
+  twice, each time leaving a different subset of files attached while reporting
+  every upload as successful. Assets are now published with `gh` and the run
+  fails unless every one is present, non-empty and uploaded. (#17, closes #13)
+- Published `checksums.txt` listed a file that was never a release asset: the
+  checksum step globbed `gpsync-*` inside the build directory, which also holds
+  the raw tray binary the Windows zip is built from. (#17)
+
+### Security
+
+- Folder and redirect inputs on the new dashboard actions are no longer
+  accepted as free-form values. Redirect targets are built server-side from a
+  fixed list, and a submitted folder selects one of the configured source
+  folders rather than supplying a path — so nothing from a request reaches the
+  scanner, the watch loop, or a `Location` header. Found by CodeQL. (#19)
+- Google's consent flow can only be started from the machine running gpsync.
+  Its callback redirects to `127.0.0.1` there, so a request from another device
+  is refused with that explanation rather than started and left to fail
+  silently. (#16)
+- An uploaded `client_secret.json` is size-capped, stored owner-only, and a Web
+  OAuth client is refused by name — it cannot use the loopback redirect. The
+  refusal never echoes the secret the file contained. (#16)
+
 ## [0.2.0]
 
 ### Added
@@ -141,6 +194,7 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/gmizrahi/gpsync/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gmizrahi/gpsync/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gmizrahi/gpsync/releases/tag/v0.1.0
