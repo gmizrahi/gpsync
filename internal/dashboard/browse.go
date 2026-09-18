@@ -82,6 +82,12 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
   </select>
   <button type="submit">Sync this folder now</button>
 </form>
+<form class="search-row" method="get" action="/mark-synced">
+  <select name="folder">
+    {{range .SourceFolders}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  <button type="submit" title="Record these files as already in Google Photos, without uploading">Mark as already synced…</button>
+</form>
 {{end}}
 <form class="search-row" method="get" action="/browse">
   <input type="hidden" name="type" value="{{.Kind}}">

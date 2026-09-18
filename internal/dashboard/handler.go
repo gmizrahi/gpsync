@@ -35,6 +35,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 	// must never share lockout state.
 	loginAttempts := newLoginAttemptTracker()
 	consent := newConsentTracker()
+	markJob := newMarkSyncedJob()
 
 	cfg := wc.Config()
 
@@ -255,6 +256,12 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 			return
 		}
 		handleSignInImportRclone(w, r, db, wc)
+	})
+	mux.HandleFunc("/mark-synced", func(w http.ResponseWriter, r *http.Request) {
+		handleMarkSynced(w, r, db, wc, markJob)
+	})
+	mux.HandleFunc("/mark-synced/status", func(w http.ResponseWriter, r *http.Request) {
+		handleMarkSyncedStatus(w, r, markJob)
 	})
 	mux.HandleFunc("/originals/clean", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
