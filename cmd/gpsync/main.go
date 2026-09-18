@@ -88,6 +88,7 @@ func rootCmd() *cobra.Command {
 		markSyncedCmd(),
 		qualityCmd(),
 		infoCmd(),
+		statsCmd(),
 		pendingCmd(),
 		whatisCmd(),
 		recheckCmd(),
