@@ -49,7 +49,10 @@ func (s *stubController) FileProgress() (int, int, int) { return 23, 6, 50 }
 func (s *stubController) FolderProgress() (int, int)    { return 0, 0 }
 func (s *stubController) CurrentFolder() string         { return "" }
 func (s *stubController) RunProgress() (int64, int64, time.Time) {
-	return 912 << 20, 2400 << 20, s.start
+	// Must exceed the in-flight totals below: a screenshot showing one
+	// file past the whole run is how the published README image went
+	// out wrong.
+	return 4200 << 20, 11500 << 20, s.start
 }
 func (s *stubController) RunPausedFor() time.Duration { return 0 }
 func (s *stubController) RequestRetryNow()            {}
@@ -60,7 +63,7 @@ func (s *stubController) CancelFile(path string) bool { return true }
 func (s *stubController) InFlightFiles() map[string]uploader.InFlightFile {
 	return map[string]uploader.InFlightFile{
 		`C:\Photos\2022\2022_07 Summer Trip\20220724_222219.mp4`:   {Sent: 812 << 20, Total: 2192 << 20},
-		`C:\Photos\2022\2022_07 Theme Park\20220729_182935.mp4`:    {Sent: 3100 << 20, Total: 3317 << 20},
+		`C:\Photos\2022\2022_07 Theme Park\20220729_182935.mp4`:    {Sent: 2100 << 20, Total: 3317 << 20},
 		`C:\Photos\2022\2022_10 City Break\20221028_141233.jpg`:    {Sent: 4 << 20, Total: 4 << 20},
 		`C:\Photos\2022\2022_10 Mountains\IMG-20221027-WA0031.jpg`: {Sent: 1 << 19, Total: 2 << 20},
 		`C:\Photos\2022\2022_03 Race Weekend\20220319_183224.mp4`:  {Sent: 96 << 20, Total: 1039 << 20},

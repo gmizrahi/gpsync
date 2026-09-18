@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"testing"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -121,6 +122,43 @@ func loadClientSecret() (*ClientSecret, error) {
 		return nil, fmt.Errorf("client_secret.json is not valid: %w", err)
 	}
 	return &cs, nil
+}
+
+// ParseClientSecretJSON reads the file Google's console hands out when you
+// create an OAuth client. Its credentials are nested under "installed" for
+// a Desktop client, which is the only kind gpsync can use -- the loopback
+// redirect the consent flow relies on is not available to a "web" client.
+//
+// Exported so the CLI's `gpsync setup` and the dashboard's upload share one
+// definition of what a valid credential file is. They had drifted apart
+// once already by virtue of only the CLI having one.
+//
+// Rejects anything without a client_id rather than storing it: a file saved
+// now and found invalid later fails at an unrelated point, typically the
+// first upload, where the real cause is no longer obvious.
+func ParseClientSecretJSON(data []byte) (ClientSecret, error) {
+	var doc struct {
+		Installed struct {
+			ClientID     string `json:"client_id"`
+			ClientSecret string `json:"client_secret"`
+		} `json:"installed"`
+		Web struct {
+			ClientID string `json:"client_id"`
+		} `json:"web"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return ClientSecret{}, fmt.Errorf("that is not a valid client_secret.json: %w", err)
+	}
+	if doc.Installed.ClientID == "" {
+		if doc.Web.ClientID != "" {
+			return ClientSecret{}, fmt.Errorf("that is a Web application OAuth client; gpsync needs one of type Desktop app")
+		}
+		return ClientSecret{}, fmt.Errorf("that does not look like an OAuth Desktop client_secret.json")
+	}
+	return ClientSecret{
+		ClientID:     doc.Installed.ClientID,
+		ClientSecret: doc.Installed.ClientSecret,
+	}, nil
 }
 
 func SaveClientSecret(cs ClientSecret) error {
@@ -266,17 +304,61 @@ func GetHTTPClient(ctx context.Context) (*http.Client, error) {
 	return oauth2.NewClient(ctx, ts), nil
 }
 
-func runConsentFlow(ctx context.Context, cfg *oauth2.Config) (*oauth2.Token, error) {
+// Consent is an in-progress consent flow: the URL to send a browser to,
+// and a channel delivering the outcome exactly once.
+//
+// It exists because the flow cannot be run inline from an HTTP handler.
+// Waiting for a human to click through Google's consent screen takes as
+// long as it takes -- often longer than the dashboard's own 30s
+// ReadTimeout -- so a handler that blocked on it would time out even when
+// the user eventually authorised. StartConsent returns as soon as the URL
+// is known; the caller reports the outcome separately.
+type Consent struct {
+	// URL is where the browser must go. It is worth surfacing rather than
+	// only opening locally: the redirect target is 127.0.0.1 on THIS
+	// machine, so a dashboard opened from a phone cannot complete the
+	// flow, and showing the URL at least says where it has to happen.
+	URL string
+	// Done delivers exactly one result and is then closed.
+	Done <-chan error
+	// Cancel releases the callback listener. Safe to call more than once,
+	// and required on every path -- the listener otherwise outlives an
+	// abandoned flow and holds its port.
+	Cancel func()
+}
+
+// StartConsent begins the OAuth consent flow and returns immediately.
+//
+// On success the token is saved, so the caller only has to report whether
+// it worked. ctx bounds the wait: a flow nobody completes must not hold
+// the callback listener forever.
+func StartConsent(ctx context.Context) (*Consent, error) {
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, baseHTTPClient())
+
+	cs, err := loadClientSecret()
+	if err != nil {
+		return nil, err
+	}
+	cfg := &oauth2.Config{
+		ClientID:     cs.ClientID,
+		ClientSecret: cs.ClientSecret,
+		Endpoint:     google.Endpoint,
+		Scopes:       Scopes,
+	}
+	return startConsent(ctx, cfg)
+}
+
+func startConsent(ctx context.Context, cfg *oauth2.Config) (*Consent, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
-	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
 	cfg.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	state, err := randomState()
 	if err != nil {
+		listener.Close()
 		return nil, err
 	}
 
@@ -284,6 +366,8 @@ func runConsentFlow(ctx context.Context, cfg *oauth2.Config) (*oauth2.Token, err
 	errCh := make(chan error, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// The state check is the callback's CSRF guard: without it anyone
+		// who can reach this loopback port could feed gpsync a code.
 		if r.URL.Query().Get("state") != state {
 			http.Error(w, "state mismatch", http.StatusBadRequest)
 			errCh <- fmt.Errorf("OAuth state mismatch")
@@ -295,7 +379,9 @@ func runConsentFlow(ctx context.Context, cfg *oauth2.Config) (*oauth2.Token, err
 			return
 		}
 		code := r.URL.Query().Get("code")
-		fmt.Fprintln(w, "Authorized. You can close this window and return to the terminal.")
+		// Deliberately does not say "return to the terminal": this flow is
+		// now also started from the dashboard, where there is none.
+		fmt.Fprintln(w, "Authorized. You can close this window.")
 		codeCh <- code
 	})
 	// Timeouts bound a stalled client on the loopback OAuth callback
@@ -308,28 +394,61 @@ func runConsentFlow(ctx context.Context, cfg *oauth2.Config) (*oauth2.Token, err
 		IdleTimeout:       60 * time.Second,
 	}
 	go func() {
-		// http.ErrServerClosed is the normal shutdown path below; anything
-		// else means the consent flow will never receive its callback, so
-		// say so rather than leaving the user staring at a browser tab.
+		// http.ErrServerClosed is the normal shutdown path; anything else
+		// means the consent flow will never receive its callback, so say
+		// so rather than leaving the user staring at a browser tab.
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintf(os.Stderr, "OAuth callback server stopped: %v\n", err)
 		}
 	}()
-	defer server.Close()
 
 	authURL := cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
-	fmt.Println("Open this URL to authorize gpsync (attempting to open your browser automatically):")
-	fmt.Println(authURL)
-	OpenBrowser(authURL)
 
-	select {
-	case code := <-codeCh:
-		return cfg.Exchange(ctx, code)
-	case err := <-errCh:
+	done := make(chan error, 1)
+	go func() {
+		defer close(done)
+		defer server.Close()
+		select {
+		case code := <-codeCh:
+			tok, err := cfg.Exchange(ctx, code)
+			if err != nil {
+				done <- err
+				return
+			}
+			done <- saveToken(tok)
+		case err := <-errCh:
+			done <- err
+		case <-ctx.Done():
+			done <- ctx.Err()
+		}
+	}()
+
+	return &Consent{URL: authURL, Done: done, Cancel: func() { server.Close() }}, nil
+}
+
+// runConsentFlow is the blocking form the CLI still wants: it opens a
+// browser, prints the URL for when that fails, and waits. Built on the same
+// start/wait pair so there is only one implementation of the flow itself.
+func runConsentFlow(ctx context.Context, cfg *oauth2.Config) (*oauth2.Token, error) {
+	c, err := startConsent(ctx, cfg)
+	if err != nil {
 		return nil, err
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	}
+	defer c.Cancel()
+
+	fmt.Println("Open this URL to authorize gpsync (attempting to open your browser automatically):")
+	fmt.Println(c.URL)
+	OpenBrowser(c.URL)
+
+	if err := <-c.Done; err != nil {
+		return nil, err
+	}
+	// startConsent already saved it; re-read so this keeps returning the
+	// token its callers expect.
+	if tok := loadToken(); tok != nil {
+		return tok, nil
+	}
+	return nil, fmt.Errorf("consent completed but no token was stored")
 }
 
 func randomState() (string, error) {
@@ -340,7 +459,17 @@ func randomState() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// OpenBrowser opens url in the user's browser.
+//
+// A no-op under `go test`: this reaches out of the process and puts a
+// window on a real person's desktop, and an OAuth consent screen at that.
+// Guarding it structurally rather than by remembering to stub it means no
+// test or dev tool can do that by accident, whatever calls it.
 func OpenBrowser(url string) {
+	if testing.Testing() {
+		return
+	}
+
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":

@@ -34,6 +34,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 	// loginAttemptTracker's own doc comment: two servers (or two tests)
 	// must never share lockout state.
 	loginAttempts := newLoginAttemptTracker()
+	consent := newConsentTracker()
 
 	cfg := wc.Config()
 
@@ -237,7 +238,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 	mux.HandleFunc("/signin", func(w http.ResponseWriter, r *http.Request) {
 		cfg := wc.Config()
 		page, err := renderSignInPage(db, cfg, appName,
-			r.URL.Query().Get("imported"), r.URL.Query().Get("error"))
+			r.URL.Query().Get("imported"), r.URL.Query().Get("error"), isLoopbackRequest(r))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -251,6 +252,23 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 			return
 		}
 		handleSignInImportRclone(w, r, db, wc)
+	})
+	mux.HandleFunc("/signin/upload", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleSignInUpload(w, r)
+	})
+	mux.HandleFunc("/signin/start", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleSignInStart(w, r, consent)
+	})
+	mux.HandleFunc("/signin/status", func(w http.ResponseWriter, r *http.Request) {
+		handleSignInStatus(w, r, consent)
 	})
 	mux.HandleFunc("/backup/create", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

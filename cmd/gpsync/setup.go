@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -82,19 +81,11 @@ func runSetup() error {
 	if err != nil {
 		return fmt.Errorf("file not found: %s", path)
 	}
-	var doc struct {
-		Installed struct {
-			ClientID     string `json:"client_id"`
-			ClientSecret string `json:"client_secret"`
-		} `json:"installed"`
+	cs, err := auth.ParseClientSecretJSON(data)
+	if err != nil {
+		return err
 	}
-	if err := json.Unmarshal(data, &doc); err != nil || doc.Installed.ClientID == "" {
-		return fmt.Errorf("that doesn't look like a valid OAuth Desktop client_secret.json")
-	}
-	if err := auth.SaveClientSecret(auth.ClientSecret{
-		ClientID:     doc.Installed.ClientID,
-		ClientSecret: doc.Installed.ClientSecret,
-	}); err != nil {
+	if err := auth.SaveClientSecret(cs); err != nil {
 		return err
 	}
 	fmt.Printf("Saved credentials to %s\n", auth.ClientSecretPath)
