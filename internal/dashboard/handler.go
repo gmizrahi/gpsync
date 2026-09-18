@@ -231,7 +231,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 
 	mux.HandleFunc("/backup", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		page, err := renderBackupPage(db, wc.Config(), q.Get("created") == "1", q.Get("files"), q.Get("error"))
+		page, err := renderBackupPage(db, wc.Config(), q.Get("created") == "1", q.Get("unrestricted") == "1", q.Get("files"), q.Get("error"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

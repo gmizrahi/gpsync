@@ -64,7 +64,7 @@ func Create(db *statedb.DB, destDir string, keepCount int) (Result, error) {
 	// prune, and is removed here anyway.
 	destPath := filepath.Join(destDir, backupFileName(time.Now()))
 	partialPath := destPath + ".partial"
-	included, err := writeZip(partialPath, tmpDBCopy)
+	included, unrestricted, err := writeZip(partialPath, tmpDBCopy)
 	if err != nil {
 		os.Remove(partialPath)
 		return Result{}, err
@@ -73,7 +73,7 @@ func Create(db *statedb.DB, destDir string, keepCount int) (Result, error) {
 		os.Remove(partialPath)
 		return Result{}, fmt.Errorf("finalizing backup archive: %w", err)
 	}
-	result := Result{Path: destPath, Files: included}
+	result := Result{Path: destPath, Files: included, Unrestricted: unrestricted}
 
 	if keepCount > 0 {
 		if err := prune(destDir, keepCount); err != nil {
@@ -91,6 +91,11 @@ func Create(db *statedb.DB, destDir string, keepCount int) (Result, error) {
 type Result struct {
 	Path  string
 	Files []string // names actually included, e.g. "state.sqlite", "config.toml", "token.json"
+	// Unrestricted reports that the destination's filesystem has no
+	// per-user permissions, so the archive could not be locked down to
+	// this account. It is not an error -- see writeZip -- but the archive
+	// holds OAuth credentials, so every caller says so out loud.
+	Unrestricted bool
 }
 
 // backupFileName always includes a fixed-width nanosecond field, not just
@@ -106,32 +111,51 @@ func backupFileName(t time.Time) string {
 // writeZip archives the consistent state.sqlite snapshot plus every OTHER
 // file directly inside statedb.StateDir -- config.toml, client_secret.json,
 // token.json, and anything else gpsync keeps there now or in the future.
-func writeZip(destPath, dbSnapshotPath string) ([]string, error) {
+// restrictToOwner is a seam: the real thing is a no-op on POSIX, so without
+// it the unsupported-filesystem path below could only ever be exercised on a
+// Windows machine with a FAT stick or a cloud drive mounted -- which is to
+// say, never in CI, on the one behaviour a user has already been bitten by.
+var restrictToOwner = fsperm.RestrictToOwner
+
+// The bool result reports that the destination filesystem has no per-user
+// permissions to set. That is NOT treated as a failure: the destination is a
+// folder the user chose, and it is very often a cloud-sync folder (Google
+// Drive's virtual drive answers ERROR_INVALID_PARAMETER for any ACL) or a
+// removable stick, where refusing to write would mean no backups at all for
+// the people most likely to want one off-machine. The caller reports it
+// instead, because the archive contains OAuth credentials.
+func writeZip(destPath, dbSnapshotPath string) (included []string, unrestricted bool, err error) {
 	// filePerm, not os.Create's 0666&umask: this archive contains
 	// client_secret.json and token.json (see this function's doc comment
 	// above), and it is usually written somewhere synced.
 	zf, err := os.OpenFile(destPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, filePerm)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer zf.Close()
 	// Windows ignores the mode above; keep the same guarantee there with an
-	// ACL. No-op on POSIX.
-	if err := fsperm.RestrictToOwner(destPath); err != nil {
-		return nil, err
+	// ACL. No-op on POSIX. Done here, on the empty staging file, so there is
+	// never a moment where a COMPLETE archive sits readable -- and the DACL
+	// survives the rename that follows (verified on NTFS: restricting the
+	// .partial and renaming leaves the final archive owner-only).
+	if err := restrictToOwner(destPath); err != nil {
+		if !errors.Is(err, fsperm.ErrUnsupported) {
+			return nil, false, err
+		}
+		unrestricted = true
 	}
 	zw := zip.NewWriter(zf)
 
 	if err := addFileToZip(zw, dbSnapshotPath, stateFileName); err != nil {
 		zw.Close()
-		return nil, err
+		return nil, unrestricted, err
 	}
-	included := []string{stateFileName}
+	included = []string{stateFileName}
 
 	entries, err := os.ReadDir(statedb.StateDir)
 	if err != nil {
 		zw.Close()
-		return nil, err
+		return nil, unrestricted, err
 	}
 	for _, e := range entries {
 		if e.IsDir() || e.Name() == stateFileName {
@@ -139,15 +163,15 @@ func writeZip(destPath, dbSnapshotPath string) ([]string, error) {
 		}
 		if err := addFileToZip(zw, filepath.Join(statedb.StateDir, e.Name()), e.Name()); err != nil {
 			zw.Close()
-			return nil, err
+			return nil, unrestricted, err
 		}
 		included = append(included, e.Name())
 	}
 
 	if err := zw.Close(); err != nil {
-		return nil, err
+		return nil, unrestricted, err
 	}
-	return included, nil
+	return included, unrestricted, nil
 }
 
 func addFileToZip(zw *zip.Writer, srcPath, nameInZip string) error {

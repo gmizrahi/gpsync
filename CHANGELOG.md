@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Backups to a cloud-sync drive work again.** Backing up to `G:\My Drive`
+  failed outright with "The parameter is incorrect" and wrote nothing: Google
+  Drive's virtual drive has no ACLs, so the call that locks the archive to
+  your account returns `ERROR_INVALID_PARAMETER` there, and that was treated
+  as fatal. A destination that has no per-user permissions at all -- a
+  cloud-sync folder, a FAT stick -- now gets the backup anyway, and both the
+  CLI and the dashboard say that this archive could not be locked down, since
+  it contains your OAuth credentials. A filesystem that *has* permissions and
+  refuses is still a hard failure. (#24)
+
 ## [0.3.1]
 
 A bug fix: a photo edited in place could be uploaded twice, with the ledger

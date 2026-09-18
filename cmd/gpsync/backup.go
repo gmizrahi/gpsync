@@ -64,6 +64,14 @@ func backupCmd() *cobra.Command {
 			}
 			fmt.Printf("%s %s (%s)\n", colOK("Backed up to"), result.Path, humanBytes(size))
 			fmt.Printf("  includes: %s\n", strings.Join(result.Files, ", "))
+			if result.Unrestricted {
+				// Not a failure: that destination has no per-user
+				// permissions to set (a cloud-sync drive, a FAT stick). The
+				// archive still holds credentials, so say so rather than
+				// letting the usual owner-only guarantee be assumed.
+				fmt.Printf("  %s %s has no per-user file permissions, so this archive could not be locked to your account\n",
+					colWarn("note:"), cfg.BackupDir)
+			}
 			if hasCredentials(result.Files) {
 				fmt.Printf("  %s this includes your OAuth credentials -- anyone with access to %s can access your Google Photos account\n",
 					colWarn("note:"), cfg.BackupDir)

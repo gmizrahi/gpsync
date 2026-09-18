@@ -21,6 +21,7 @@ type backupPageData struct {
 	BackupDir     string
 	Created       bool
 	CreatedFiles  string
+	Unrestricted  bool
 	ErrorMessage  string
 	Backups       []backupRow
 }
@@ -33,6 +34,7 @@ type backupRow struct {
 
 var backupTmpl = template.Must(template.New("backup").Parse(`
 {{if .Created}}<div class="banner banner-ok">Backup created ({{.CreatedFiles}}).</div>{{end}}
+{{if .Unrestricted}}<div class="banner banner-warn">{{.BackupDir}} has no per-user file permissions, so this archive could not be locked to your account. It contains your OAuth credentials.</div>{{end}}
 {{if .ErrorMessage}}<div class="banner banner-err">{{.ErrorMessage}}</div>{{end}}
 {{if .NotConfigured}}
 <div class="card">
@@ -63,10 +65,11 @@ var backupTmpl = template.Must(template.New("backup").Parse(`
 // refuses to run without a destination configured, but surfacing that
 // up front (matching the Duplicate Resolver's own TrashDir check below)
 // is a friendlier first thing to see than an error after clicking.
-func renderBackupPage(db *statedb.DB, cfg config.Config, created bool, createdFiles, errMsg string) (string, error) {
+func renderBackupPage(db *statedb.DB, cfg config.Config, created, unrestricted bool, createdFiles, errMsg string) (string, error) {
 	data := backupPageData{
 		BackupDir:    cfg.BackupDir,
 		Created:      created,
+		Unrestricted: unrestricted,
 		CreatedFiles: createdFiles,
 		ErrorMessage: errMsg,
 	}
@@ -168,6 +171,11 @@ func handleBackupCreate(w http.ResponseWriter, r *http.Request, db *statedb.DB, 
 	v := url.Values{}
 	v.Set("created", "1")
 	v.Set("files", strings.Join(result.Files, ", "))
+	if result.Unrestricted {
+		// The backup worked; this is the caveat that comes with the
+		// destination the user picked. See backup.Result.Unrestricted.
+		v.Set("unrestricted", "1")
+	}
 	http.Redirect(w, r, "/backup?"+v.Encode(), http.StatusSeeOther)
 }
 
