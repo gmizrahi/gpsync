@@ -22,7 +22,7 @@ func TestRenderBrowsePage_OffsetZero_PrevLinkAbsent(t *testing.T) {
 	db := openTestDB(t)
 	mustNoErr(t, db.EnsurePending("h1", 10, "image/jpeg", "/lib/a.jpg", nil))
 
-	page, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false)
+	page, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +593,7 @@ func TestRenderBrowsePage_UploadedNeedsReviewIgnored_Render(t *testing.T) {
 		{engine.FileListIgnored, "ignored-file.jpg", "<title>Ignored —"},
 	}
 	for _, c := range cases {
-		page, err := renderBrowsePage(db, c.kind, "", "", false, 0, config.ThemeDark, false)
+		page, err := renderBrowsePage(db, c.kind, "", "", false, 0, config.ThemeDark, false, nil, "", "")
 		if err != nil {
 			t.Fatalf("%s: %v", c.kind, err)
 		}
@@ -1002,7 +1002,7 @@ func TestPages_UseKBMBGBLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	browse, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false)
+	browse, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

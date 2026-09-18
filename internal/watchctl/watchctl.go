@@ -75,8 +75,11 @@ type WatchController struct {
 	// stopping, regardless of what any later, concurrent Start() does.
 	done         chan struct{}
 	manualRescan chan struct{}
-	skip         *uploader.SkipSignal
-	fileCancels  *uploader.FileCancelRegistry
+	// adhoc carries a single folder to sync on demand. Buffered and
+	// per-Start() like manualRescan; see SyncFolderNow.
+	adhoc       chan string
+	skip        *uploader.SkipSignal
+	fileCancels *uploader.FileCancelRegistry
 
 	// liveMu guards every ephemeral, process-local "what's happening right
 	// now" field below -- none of it is in the ledger (run_progress only
@@ -240,6 +243,7 @@ func (wc *WatchController) RescanNow() {
 // RequestRetryNow asks the running upload pipeline to expire whatever
 // circuit-breaker countdown is currently in progress, right now, instead
 // of waiting out the rest of it -- a no-op if the engine isn't running.
+
 func (wc *WatchController) RequestRetryNow() {
 	wc.mu.Lock()
 	s, running := wc.skip, wc.running
@@ -248,6 +252,37 @@ func (wc *WatchController) RequestRetryNow() {
 		return
 	}
 	s.Request()
+}
+
+// SyncFolderNow queues one folder for a scan-and-upload cycle.
+//
+// Mirrors RescanNow, with two deliberate differences. It carries a folder,
+// fanning into the same channel the filesystem watcher feeds, so the
+// request is handled exactly like a live change and stays serialised on
+// the watch goroutine -- two concurrent RunFolderCycle calls would each
+// get their own circuit-breaker state and neither would know the other had
+// just been throttled.
+//
+// And it reports rather than silently doing nothing when the engine is
+// stopped. RescanNow can no-op there because it is a nudge to work already
+// scheduled; this is a request a person just made, and "paused watching,
+// want this one folder synced" is the common case for asking.
+//
+// Queued, not immediate: if a baseline sweep or another folder's cycle is
+// already running, this waits its turn.
+func (wc *WatchController) SyncFolderNow(folder string) error {
+	wc.mu.Lock()
+	ch, running := wc.adhoc, wc.running
+	wc.mu.Unlock()
+	if !running || ch == nil {
+		return errors.New("watching is paused -- resume it first, then sync a folder")
+	}
+	select {
+	case ch <- folder:
+		return nil
+	default:
+		return errors.New("a sync is already queued; it will run shortly")
+	}
 }
 
 // CancelFile interrupts ONE specific file's active byte-upload transfer,
@@ -508,11 +543,13 @@ func (wc *WatchController) Start() {
 	stopCh := make(chan struct{})
 	done := make(chan struct{})
 	manualRescan := make(chan struct{}, 1)
+	adhoc := make(chan string, 4)
 	skip := uploader.NewSkipSignal()
 	fileCancels := uploader.NewFileCancelRegistry()
 	wc.stopCh = stopCh
 	wc.done = done
 	wc.manualRescan = manualRescan
+	wc.adhoc = adhoc
 	wc.skip = skip
 	wc.fileCancels = fileCancels
 	go func() {
@@ -537,7 +574,7 @@ func (wc *WatchController) Start() {
 				os.Exit(1)
 			}
 		}()
-		wc.run(stopCh, manualRescan, skip, fileCancels)
+		wc.run(stopCh, manualRescan, adhoc, skip, fileCancels)
 	}()
 }
 
@@ -567,7 +604,7 @@ func (wc *WatchController) Stop() {
 // then the same engine.RunWatchLoop prioritization every `gpsync watch`
 // invocation uses, wired to engine.RunFolderCycle (no terminal output)
 // instead of the CLI's colored dashboard.
-func (wc *WatchController) run(stopCh chan struct{}, manualRescan <-chan struct{}, skip *uploader.SkipSignal, fileCancels *uploader.FileCancelRegistry) {
+func (wc *WatchController) run(stopCh chan struct{}, manualRescan <-chan struct{}, adhoc <-chan string, skip *uploader.SkipSignal, fileCancels *uploader.FileCancelRegistry) {
 	// Whatever exit path this goroutine takes -- Stop() was called, or
 	// there was nothing to watch at all -- wc.running must end up false
 	// so IsRunning()/a live status view stay accurate. Stop() also sets
@@ -705,6 +742,34 @@ func (wc *WatchController) run(stopCh chan struct{}, manualRescan <-chan struct{
 		}
 	}()
 
+	// An ad-hoc request is a live-change event as far as the loop is
+	// concerned, so it fans into the SAME `ready` channel the filesystem
+	// watcher feeds -- exactly how Rescan Now fans into heartbeatCh above.
+	// Work therefore stays serialised on this one goroutine: no second
+	// RunFolderCycle can race the first, which is the guarantee the
+	// circuit breaker depends on.
+	readyCh := make(chan string)
+	go func() {
+		for {
+			select {
+			case f := <-w.Ready():
+				select {
+				case readyCh <- f:
+				case <-ctx.Done():
+					return
+				}
+			case f := <-adhoc:
+				select {
+				case readyCh <- f:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	engine.RunWatchLoop(
 		func(folder string) { cycle(folder) },
 		func(folder string, remaining int) { cycleAt(folder, backlogTotal-remaining, backlogTotal) },
@@ -720,7 +785,7 @@ func (wc *WatchController) run(stopCh chan struct{}, manualRescan <-chan struct{
 			resolveMissingFiles(wc.db, cfg, true)
 		},
 		func(werr error) { log.Printf("watch error: %v", werr) },
-		backlog, w.Ready(), heartbeatCh, w.Errors(), stopCh,
+		backlog, readyCh, heartbeatCh, w.Errors(), stopCh,
 	)
 }
 

@@ -50,6 +50,13 @@ type browsePageData struct {
 	ShowingTo   int
 	PrevLink    string
 	NextLink    string
+
+	// SourceFolders backs the "sync one folder now" control. Only
+	// configured folders are offered, and the handler re-checks the
+	// submitted value -- a select is a convenience, not a guarantee.
+	SourceFolders []string
+	Message       string
+	ErrorMessage  string
 }
 
 // browseTmpl mirrors settingsTmpl's reasoning: html/template, not string
@@ -64,6 +71,17 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
   <a href="/browse?type=needs_review&q={{.Query}}" {{if eq .Kind "needs_review"}}class="active"{{end}}>Needs review</a>
   <a href="/browse?type=ignored&q={{.Query}}" {{if eq .Kind "ignored"}}class="active"{{end}}>Ignored</a>
 </div>
+{{if .Message}}<div class="banner banner-ok">{{.Message}}</div>{{end}}
+{{if .ErrorMessage}}<div class="banner banner-err">{{.ErrorMessage}}</div>{{end}}
+{{if .SourceFolders}}
+<form class="search-row" method="post" action="/sync-folder">
+  <input type="hidden" name="return" value="/browse?type={{.Kind}}&q={{.Query}}">
+  <select name="folder">
+    {{range .SourceFolders}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  <button type="submit">Sync this folder now</button>
+</form>
+{{end}}
 <form class="search-row" method="get" action="/browse">
   <input type="hidden" name="type" value="{{.Kind}}">
   <input type="text" name="q" value="{{.Query}}" placeholder="Filter by path or hash...">
@@ -174,7 +192,7 @@ func buildSortColumns(kind engine.FileListKind, query string, sortKey engine.Sor
 	return cols
 }
 
-func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, offset int, theme string, authEnabled bool) (string, error) {
+func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, offset int, theme string, authEnabled bool, sourceFolders []string, msg, errMsg string) (string, error) {
 	res, err := engine.BrowseFiles(db, engine.BrowseQuery{
 		Kind: kind, Search: query, Sort: sortKey, SortDesc: sortDesc, Offset: offset, Limit: browseLimit,
 	})
@@ -210,6 +228,10 @@ func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, so
 		Columns:   buildSortColumns(kind, query, sortKey, sortDesc),
 		Rows:      rows,
 		Total:     res.Total,
+
+		SourceFolders: sourceFolders,
+		Message:       msg,
+		ErrorMessage:  errMsg,
 	}
 	if res.Total > 0 {
 		data.ShowingFrom = res.Offset + 1

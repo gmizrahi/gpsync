@@ -54,9 +54,10 @@ func (s *stubController) RunProgress() (int64, int64, time.Time) {
 	// out wrong.
 	return 4200 << 20, 11500 << 20, s.start
 }
-func (s *stubController) RunPausedFor() time.Duration { return 0 }
-func (s *stubController) RequestRetryNow()            {}
-func (s *stubController) CancelFile(path string) bool { return true }
+func (s *stubController) RunPausedFor() time.Duration       { return 0 }
+func (s *stubController) RequestRetryNow()                  {}
+func (s *stubController) CancelFile(path string) bool       { return true }
+func (s *stubController) SyncFolderNow(folder string) error { return nil }
 
 // InFlightFiles returns a realistic spread: long and short names, partial
 // and complete, so row truncation and the progress bar both get exercised.

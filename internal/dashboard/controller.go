@@ -37,6 +37,10 @@ type Controller interface {
 	CurrentBackoff() *uploader.BackoffStatus
 	RequestRetryNow()
 	CancelFile(path string) bool
+	// SyncFolderNow queues one folder for a scan-and-upload cycle. Returns
+	// an error when the engine is stopped or a request is already queued --
+	// a person asked for this, so it says so rather than no-opping.
+	SyncFolderNow(folder string) error
 }
 
 // AutostartController is the seam for the Windows registry Run-key toggle

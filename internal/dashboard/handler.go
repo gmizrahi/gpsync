@@ -216,7 +216,9 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		offset, _ := strconv.Atoi(q.Get("offset"))
 		sortKey := engine.SortKey(q.Get("sort"))
 		sortDesc := q.Get("dir") == "desc"
-		page, err := renderBrowsePage(db, kind, q.Get("q"), sortKey, sortDesc, offset, wc.Config().Theme, wc.Config().DashboardAuthEnabled)
+		bcfg := wc.Config()
+		page, err := renderBrowsePage(db, kind, q.Get("q"), sortKey, sortDesc, offset, bcfg.Theme, bcfg.DashboardAuthEnabled,
+			bcfg.SourceFolders, q.Get("synced"), q.Get("error"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -252,6 +254,13 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 			return
 		}
 		handleSignInImportRclone(w, r, db, wc)
+	})
+	mux.HandleFunc("/sync-folder", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleSyncFolder(w, r, wc)
 	})
 	mux.HandleFunc("/signin/upload", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
