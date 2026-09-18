@@ -29,7 +29,14 @@ jobs:
           check-latest: true
       - run: go build ./...
       - run: go vet ./...
-      - run: go test ./... -count=1
+      # 30m, not go test's 10m default. internal/engine runs ~400s on the
+      # Windows runner against ~7s on Linux -- the package hashes a
+      # multi-gigabyte decoy file to prove scan and upload overlap, and that
+      # is disk-bound. At 400s it was already using two thirds of the
+      # default budget, so an ordinary slow run tripped it on a commit that
+      # changed no code at all. The tests are not stuck; the budget was too
+      # close to the real cost.
+      - run: go test ./... -count=1 -timeout 30m
 
   # The upload pipeline is concurrent throughout: a circuit breaker and an
   # adaptive limiter shared across goroutines, plus the watch loop. Two real
@@ -43,7 +50,9 @@ jobs:
         with:
           go-version: stable
           check-latest: true
-      - run: go test -race ./... -count=1
+      # The race detector makes everything several times slower again, so
+      # this needs more headroom than the plain run, not less.
+      - run: go test -race ./... -count=1 -timeout 45m
 
   # gpsync-tray is Windows-only, so it never builds on the Linux job above.
   # This also proves every release target still cross-compiles.
