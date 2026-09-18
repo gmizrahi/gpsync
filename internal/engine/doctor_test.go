@@ -190,3 +190,64 @@ func TestDiagnose_ReportsConfirmedMissingButNeverRemovesThem(t *testing.T) {
 		t.Error("Repair removed a confirmed-missing entry; only recheck --missing may")
 	}
 }
+
+// Issue #22. A pending row whose path now holds different content is the
+// dangerous case: uploadOneBytes only stats the path before sending, so
+// leaving it queued uploads the EDITED bytes under the ORIGINAL hash -- the
+// photo goes up twice, and the ledger then claims the original was uploaded
+// when it never was.
+func TestDiagnose_SupersededQueuedRow_IsFoundAndForgotten(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	p := filepath.Join(dir, "20230305_103022.jpg")
+	mustNoErr(t, os.WriteFile(p, []byte("edited"), 0o644))
+	mustNoErr(t, db.EnsurePending("sha-original", 1, "image/jpeg", p, nil))
+	mustNoErr(t, db.UpsertFileSeen(p, "sha-edited", 0, 1))
+
+	rep, err := Diagnose(db, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := findingFor(t, rep, CheckSupersededRows)
+	if f.Count != 1 || !f.Fixable {
+		t.Fatalf("finding = %+v, want Count 1 and fixable", f)
+	}
+
+	if _, err := Repair(db, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	row, err := db.GetUpload("sha-original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row != nil {
+		t.Errorf("the stale row survived --fix: %+v", row)
+	}
+}
+
+// An already-uploaded row is history, not a problem: that content really
+// was sent. Only its first_source_path is stale, and --fix must not throw
+// away the record of an upload that happened.
+func TestDiagnose_SupersededUploadedRow_IsKeptAsHistory(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	p := filepath.Join(dir, "20230305_103022.jpg")
+	mustNoErr(t, os.WriteFile(p, []byte("edited"), 0o644))
+	mustNoErr(t, db.EnsurePending("sha-original", 1, "image/jpeg", p, nil))
+	mustNoErr(t, db.MarkUploaded("sha-original", "media-1", ""))
+	mustNoErr(t, db.UpsertFileSeen(p, "sha-edited", 0, 1))
+
+	rep, err := Diagnose(db, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := findingFor(t, rep, CheckSupersededRows); f.Fixable || f.Count != 0 {
+		t.Fatalf("finding = %+v, want nothing to fix for an uploaded row", f)
+	}
+	if _, err := Repair(db, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if row, err := db.GetUpload("sha-original"); err != nil || row == nil {
+		t.Error("--fix deleted the record of a file that really was uploaded")
+	}
+}

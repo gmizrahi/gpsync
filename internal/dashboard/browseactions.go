@@ -56,6 +56,8 @@ func handleBrowseRecheck(w http.ResponseWriter, r *http.Request, db *statedb.DB)
 	switch outcome {
 	case engine.RecheckBackOnDisk:
 		redirectBrowse(w, r, back, "That file is on disk; the missing flag is cleared.", "")
+	case engine.RecheckReplaced:
+		redirectBrowse(w, r, back, "A file is at that path, but it holds different content now -- this one was edited or overwritten. Recorded as missing, not removed.", "")
 	default:
 		redirectBrowse(w, r, back, "That file is still gone. It is recorded as missing, not removed.", "")
 	}

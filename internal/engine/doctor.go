@@ -29,6 +29,7 @@ const (
 	CheckMissingSourceFile = "missing-source-file"
 	CheckOriginalsReview   = "originals-auto-resolvable"
 	CheckPermanentFailures = "permanent-failures"
+	CheckSupersededRows    = "superseded-rows"
 )
 
 // Finding is one problem (or one clean bill of health) from Diagnose.
@@ -77,9 +78,10 @@ func (r Report) Healthy() bool { return len(r.Problems()) == 0 }
 // previously needed its own bespoke one-off fix: a run_progress row stuck
 // at "running" after a Ctrl+C, a failed_retryable backlog that nothing
 // would ever sweep back (which silently idled the app for over an hour),
-// pending rows for files that have since been deleted or moved, and
+// pending rows for files that have since been deleted or moved,
 // originals-review items that became auto-resolvable once their sibling
-// was scanned.
+// was scanned, and queued rows left behind by a file edited in place,
+// which would otherwise upload the new content under the old hash.
 func Diagnose(db *statedb.DB, now time.Time) (Report, error) {
 	rep := Report{Checked: now}
 
@@ -100,6 +102,29 @@ func Diagnose(db *statedb.DB, now time.Time) (Report, error) {
 		}
 	}
 	rep.Findings = append(rep.Findings, stuck)
+
+	// Rows whose path now holds different content -- a photo edited in
+	// place keeps its path and changes its hash. See db.SupersededRows.
+	sup, err := db.SupersededRows()
+	if err != nil {
+		return rep, err
+	}
+	superseded := Finding{Check: CheckSupersededRows, Summary: "no rows point at content that has been replaced"}
+	if queued := supersededQueued(sup); len(queued) > 0 {
+		superseded.Count = len(queued)
+		superseded.Summary = fmt.Sprintf("%d queued row(s) point at a path that now holds different content", len(queued))
+		// Not cosmetic: uploadOneBytes only stats the path before
+		// sending, so one of these would upload whatever is at that path
+		// NOW and record it under the old hash -- the edited photo twice,
+		// and a claim that the original was uploaded when it never was.
+		superseded.Remedy = "forget them; the file they describe was edited or overwritten, and uploading now would send the new contents under the old hash"
+		superseded.Fixable = true
+	} else if len(sup) > 0 {
+		// Already-uploaded rows are history, not a problem: that content
+		// really was sent. Only first_source_path is stale.
+		superseded.Summary = fmt.Sprintf("%d replaced row(s), all already uploaded -- kept as history", len(sup))
+	}
+	rep.Findings = append(rep.Findings, superseded)
 
 	counts, err := db.CountsByStatus()
 	if err != nil {
@@ -188,6 +213,18 @@ func Repair(db *statedb.DB, now time.Time) (Report, error) {
 				return rep, err
 			}
 			rep.Findings[i].Count = int(n)
+		case CheckSupersededRows:
+			sup, err := db.SupersededRows()
+			if err != nil {
+				return rep, err
+			}
+			queued := supersededQueued(sup)
+			for _, r := range queued {
+				if err := db.DeleteUpload(r.SHA256); err != nil {
+					return rep, err
+				}
+			}
+			rep.Findings[i].Count = len(queued)
 		case CheckOriginalsReview:
 			sum, err := AutoResolveObviousOriginals(db)
 			if err != nil {
@@ -230,4 +267,22 @@ func roundDuration(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%.0fs", d.Seconds())
 	}
+}
+
+// supersededQueued narrows superseded rows to the ones that would actually
+// do damage: still queued for upload.
+//
+// An uploaded row is left alone deliberately. That content genuinely was
+// sent, so the row is history worth keeping -- it is what `gpsync verify`
+// and `gpsync reupload` read. Only its first_source_path is stale, and a
+// stale path on a finished row harms nothing.
+func supersededQueued(rows []statedb.SupersededRow) []statedb.SupersededRow {
+	var out []statedb.SupersededRow
+	for _, r := range rows {
+		switch r.Status {
+		case "pending", "failed_retryable":
+			out = append(out, r)
+		}
+	}
+	return out
 }

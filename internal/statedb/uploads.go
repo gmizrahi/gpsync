@@ -669,3 +669,60 @@ func (db *DB) SuccessfulUploadTimestamps() ([]UploadedAtSize, error) {
 	}
 	return out, rows.Err()
 }
+
+// SupersededRow is an uploads row whose recorded path now holds different
+// content. CurrentSHA256 is what the last scan found there.
+type SupersededRow struct {
+	SHA256          string
+	Status          string
+	Size            int64
+	FirstSourcePath string
+	CurrentSHA256   string
+}
+
+// SupersededRows finds ledger rows whose recorded path is now known to hold
+// different content, and whose own content is at no scanned path at all.
+//
+// The case this exists for: a photo edited in place -- a crop, a rotate, an
+// exposure fix -- keeps its path but changes its content and therefore its
+// hash. files_seen is keyed by path, so the next scan overwrites that path's
+// hash with the new one, while the OLD hash's uploads row is left behind
+// still naming that path. Nothing path-based notices, because the path is
+// still there.
+//
+// Two conditions, and both are load-bearing:
+//
+// The join requires files_seen to still hold that path with a DIFFERENT
+// hash. That is the difference between "edited" and "deleted": a scan prunes
+// files_seen for a file that is gone, so a deleted file has no row here and
+// never matches. Deletion is CheckMissingSourceFile's business, and it
+// deliberately never forgets a row on its own -- an unplugged drive must
+// lose nothing.
+//
+// The NOT EXISTS requires this row's own content to be at no scanned path.
+// A file that was merely MOVED keeps its hash under a new path, and a second
+// copy elsewhere keeps it too. Either one means the content is still held,
+// so the row still describes something real.
+func (db *DB) SupersededRows() ([]SupersededRow, error) {
+	rows, err := db.conn.Query(
+		`SELECT u.sha256, u.status, u.size, u.first_source_path, fs.sha256
+		   FROM uploads u
+		   JOIN files_seen fs ON fs.path = u.first_source_path
+		  WHERE fs.sha256 <> u.sha256
+		    AND NOT EXISTS (SELECT 1 FROM files_seen f2 WHERE f2.sha256 = u.sha256)
+		  ORDER BY u.first_source_path`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SupersededRow
+	for rows.Next() {
+		var r SupersededRow
+		if err := rows.Scan(&r.SHA256, &r.Status, &r.Size, &r.FirstSourcePath, &r.CurrentSHA256); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

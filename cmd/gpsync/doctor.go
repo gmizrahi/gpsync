@@ -20,6 +20,7 @@ func doctorCmd() *cobra.Command {
 			"  - files confirmed missing from disk\n" +
 			"  - originals-review items that can be resolved automatically\n" +
 			"  - permanent failures\n" +
+			"  - queued files whose path now holds different content, because it was edited\n" +
 			"\n" +
 			"Without --fix it only reports, and is safe to run at any time. --fix repairs what needs no decision; for everything else the report names the command to use.",
 		Args: cobra.NoArgs,

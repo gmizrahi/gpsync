@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/gmizrahi/gpsync/internal/hashing"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
 
@@ -24,6 +25,11 @@ const (
 	// RecheckStillGone: the file is not there. Recorded as confirmed
 	// missing, which is what `gpsync recheck --missing` acts on.
 	RecheckStillGone RecheckOutcome = "gone"
+	// RecheckReplaced: a file is at that path, but it holds different
+	// content now -- the photo was edited or overwritten in place. This
+	// row's content is gone as surely as if the file had been deleted, so
+	// it is recorded the same way.
+	RecheckReplaced RecheckOutcome = "replaced"
 )
 
 // RecheckOne re-examines a single tracked file, the per-row equivalent of
@@ -47,10 +53,30 @@ func RecheckOne(db *statedb.DB, sha256 string, now time.Time) (RecheckOutcome, e
 	}
 
 	if _, statErr := os.Stat(u.FirstSourcePath); statErr == nil {
-		if err := db.ClearMissing(sha256); err != nil {
-			return "", fmt.Errorf("clearing the missing flag: %w", err)
+		// Existence is not enough. A photo edited in place keeps its path
+		// and changes its hash, which leaves this row naming a file that
+		// is no longer its content. Saying "back on disk" there would be a
+		// false verdict, and worse: uploadOneBytes only stats the path, so
+		// a pending row cleared this way uploads the NEW bytes under the
+		// OLD hash.
+		onDisk, hashErr := hashing.SHA256File(u.FirstSourcePath)
+		if hashErr != nil {
+			return "", fmt.Errorf("could not read %s: %w", u.FirstSourcePath, hashErr)
 		}
-		return RecheckBackOnDisk, nil
+		if onDisk == sha256 {
+			if err := db.ClearMissing(sha256); err != nil {
+				return "", fmt.Errorf("clearing the missing flag: %w", err)
+			}
+			return RecheckBackOnDisk, nil
+		}
+		nowF := float64(now.Unix())
+		if err := db.MarkMissing(sha256, nowF); err != nil {
+			return "", fmt.Errorf("flagging as missing: %w", err)
+		}
+		if err := db.ConfirmMissing(sha256, nowF); err != nil {
+			return "", fmt.Errorf("confirming missing: %w", err)
+		}
+		return RecheckReplaced, nil
 	} else if !os.IsNotExist(statErr) {
 		// A permission error or an unreachable share says nothing about
 		// whether the file exists. Reporting "gone" on one would be a

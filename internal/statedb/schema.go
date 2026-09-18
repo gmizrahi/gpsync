@@ -72,6 +72,12 @@ CREATE TABLE IF NOT EXISTS files_seen (
     size INTEGER,
     last_scanned REAL
 );
+-- "does any path still hold this content" (see SupersededRows), asked once
+-- per uploads row. Without this it re-reads all of files_seen each time,
+-- which on a real ledger of tens of thousands of rows is quadratic -- the
+-- same shape as the two scan-per-row queries already fixed in this file's
+-- history.
+CREATE INDEX IF NOT EXISTS idx_files_seen_sha256 ON files_seen(sha256);
 
 CREATE TABLE IF NOT EXISTS quota_daily (
     date_pt TEXT PRIMARY KEY,
