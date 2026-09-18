@@ -26,8 +26,11 @@ func TestFolderIsConfigured(t *testing.T) {
 		want   bool
 	}{
 		{filepath.Join("C:", "Photos"), true},
-		{filepath.Join("C:", "Photos", "2026"), true},
-		{filepath.Join("D:", "Media", "Video", "clips"), true},
+		// Exact match only: the forms offer a <select> of these very
+		// entries, so accepting arbitrary subpaths would widen the
+		// surface for a feature nothing uses.
+		{filepath.Join("C:", "Photos", "2026"), false},
+		{filepath.Join("D:", "Media", "Video", "clips"), false},
 		// A sibling whose name merely starts with a configured root.
 		{filepath.Join("C:", "PhotosOther"), false},
 		{filepath.Join("D:", "Media"), false},
@@ -42,8 +45,10 @@ func TestFolderIsConfigured(t *testing.T) {
 		}
 		// The cleaned path is what callers pass on, so it must be the
 		// value that was actually checked -- not the raw input.
-		if got && clean != filepath.Clean(tc.folder) {
-			t.Errorf("folderIsConfigured(%q) returned %q, want the cleaned path", tc.folder, clean)
+		// The CONFIGURED string, not one derived from the argument --
+		// that is what keeps request data out of the scanner entirely.
+		if got && clean != tc.folder {
+			t.Errorf("folderIsConfigured(%q) returned %q, want the configured entry", tc.folder, clean)
 		}
 		if !got && clean != "" {
 			t.Errorf("folderIsConfigured(%q) returned %q on refusal, want empty", tc.folder, clean)
@@ -57,7 +62,7 @@ func TestSyncFolder_QueuesAConfiguredFolder(t *testing.T) {
 	ctrl.cfg.SourceFolders = []string{filepath.Join("C:", "Photos")}
 
 	srv := newTestServer(t, db, ctrl, Options{AppName: "GPhotos Sync"})
-	want := filepath.Join("C:", "Photos", "2026")
+	want := filepath.Join("C:", "Photos")
 	resp, err := newTestClient(t).PostForm(srv.URL+"/sync-folder", url.Values{"folder": {want}})
 	mustNoErr(t, err)
 	defer resp.Body.Close()

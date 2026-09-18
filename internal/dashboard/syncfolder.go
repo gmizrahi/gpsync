@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/gmizrahi/gpsync/internal/config"
-	"github.com/gmizrahi/gpsync/internal/engine"
 )
 
 // folderIsConfigured reports whether folder sits inside one of the
@@ -23,22 +22,21 @@ import (
 // Compares cleaned absolute paths and requires a separator boundary, so
 // "C:\PhotosOther" is not accepted as living inside "C:\Photos".
 func folderIsConfigured(cfg config.Config, folder string) (string, bool) {
-	folder = strings.TrimSpace(folder)
-	if folder == "" {
+	want := filepath.Clean(strings.TrimSpace(folder))
+	if want == "" || want == "." {
 		return "", false
 	}
-	want := filepath.Clean(folder)
 	for _, root := range cfg.SourceFolders {
-		root = filepath.Clean(strings.TrimSpace(root))
-		if root == "" {
-			continue
-		}
-		if want == root || strings.HasPrefix(want, root+string(filepath.Separator)) {
-			// The CLEANED path is returned so callers use the value that
-			// was actually checked. Validating one string and passing a
-			// different one is how a traversal slips past a guard that
-			// looked correct.
-			return want, true
+		if filepath.Clean(strings.TrimSpace(root)) == want {
+			// Returns the CONFIGURED string, never one derived from the
+			// request, so nothing user-supplied reaches the scanner or the
+			// watch loop -- a traversal has nothing to travel through; the
+			// request only selects which stored folder to use.
+			//
+			// Exact match, not a prefix: the only things that submit a
+			// folder are <select>s listing these very entries, so accepting
+			// arbitrary subpaths would widen the surface for no feature.
+			return root, true
 		}
 	}
 	return "", false
@@ -47,11 +45,10 @@ func folderIsConfigured(cfg config.Config, folder string) (string, bool) {
 // handleSyncFolder queues one folder for a cycle.
 func handleSyncFolder(w http.ResponseWriter, r *http.Request, wc Controller) {
 	folder := strings.TrimSpace(r.FormValue("folder"))
-	// engine.LoginRedirectTarget, not a hand-rolled check: it also rejects
-	// a leading "/\" (browsers normalise that to "//" -- protocol-relative)
-	// and any ASCII control character (browsers strip tab/newline before
-	// parsing). A local copy of this check missed both.
-	back := safeReturnTo(r.FormValue("return"), "/browse?type=pending")
+	// Rebuilt from a validated tab name rather than echoing a URL back
+	// from the form: nothing user-supplied reaches the Location header,
+	// which is the only way to be sure it cannot point off-site.
+	back := browseTabURL(r.FormValue("tab"))
 
 	redirect := func(msg, errMsg string) {
 		v := url.Values{}
@@ -80,20 +77,18 @@ func handleSyncFolder(w http.ResponseWriter, r *http.Request, wc Controller) {
 	redirect("Queued "+filepath.Base(clean)+" for a sync. It runs after whatever is already in progress.", "")
 }
 
-// safeReturnTo confines a form-supplied redirect target to this site.
+// browseTabURL turns a tab name into a Browse URL, server-side.
 //
-// Delegates to engine.LoginRedirectTarget rather than re-implementing the
-// rules: it rejects a leading "//" AND "/\\" (browsers normalise the
-// latter to protocol-relative) and any ASCII control character (browsers
-// strip tab/newline/CR before parsing a URL, so "/\tevil.example" would
-// otherwise sail past a naive second-character check). Both were missed by
-// a local copy of this logic, twice.
-func safeReturnTo(raw, fallback string) string {
-	if raw == "" {
-		return fallback
+// An allowlist, not a validated echo: only these names produce anything
+// and the URL itself is a constant. Earlier versions took the whole
+// return URL from the form and tried to prove it was local -- twice with
+// a check that missed a leading backslash and control characters. Not
+// accepting the input at all removes the question.
+func browseTabURL(tab string) string {
+	switch tab {
+	case "pending", "failed_retryable", "failed_permanent", "uploaded", "needs_review", "ignored":
+		return "/browse?type=" + tab
+	default:
+		return "/browse?type=pending"
 	}
-	if got := engine.LoginRedirectTarget(raw); got == raw {
-		return raw
-	}
-	return fallback
 }

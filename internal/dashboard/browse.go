@@ -76,7 +76,7 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
 {{if .ErrorMessage}}<div class="banner banner-err">{{.ErrorMessage}}</div>{{end}}
 {{if .SourceFolders}}
 <form class="search-row" method="post" action="/sync-folder">
-  <input type="hidden" name="return" value="/browse?type={{.Kind}}&q={{.Query}}">
+  <input type="hidden" name="tab" value="{{.Kind}}">
   <select name="folder">
     {{range .SourceFolders}}<option value="{{.}}">{{.}}</option>{{end}}
   </select>
@@ -103,7 +103,7 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
       <th class="center">Actions</th>
     </tr></thead>
     <tbody>
-      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="return" value="/browse?type={{$.Kind}}&q={{$.Query}}"><button type="submit" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="return" value="/browse?type={{$.Kind}}&q={{$.Query}}"><button type="submit" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></td></tr>{{end}}
+      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></td></tr>{{end}}
       {{if not .Rows}}<tr><td colspan="8">No matching files.</td></tr>{{end}}
     </tbody>
   </table>

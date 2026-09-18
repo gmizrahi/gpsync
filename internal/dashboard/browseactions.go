@@ -12,14 +12,9 @@ import (
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
 
-// browseReturn confines the form's return target to this site.
-//
-// Shares safeReturnTo rather than checking here: a local version of this
-// missed a leading "/\\" (which browsers normalise to protocol-relative)
-// and embedded control characters (which browsers strip before parsing).
-func browseReturn(raw string) string {
-	return safeReturnTo(raw, "/browse?type=pending")
-}
+// browseReturn builds the Browse URL to return to from a tab name.
+// Server-constructed allowlist -- see browseTabURL.
+func browseReturn(tab string) string { return browseTabURL(tab) }
 
 func redirectBrowse(w http.ResponseWriter, r *http.Request, back, msg, errMsg string) {
 	v := url.Values{}
@@ -41,7 +36,7 @@ func redirectBrowse(w http.ResponseWriter, r *http.Request, back, msg, errMsg st
 // The hash is client-supplied; engine.RecheckOne refuses one that matches
 // no ledger row rather than treating it as a no-op.
 func handleBrowseRecheck(w http.ResponseWriter, r *http.Request, db *statedb.DB) {
-	back := browseReturn(r.FormValue("return"))
+	back := browseReturn(r.FormValue("tab"))
 	sha := strings.TrimSpace(r.FormValue("sha256"))
 	if sha == "" {
 		redirectBrowse(w, r, back, "", "no file was named")
@@ -68,7 +63,7 @@ func handleBrowseRecheck(w http.ResponseWriter, r *http.Request, db *statedb.DB)
 
 // handleBrowseForget drops one ledger row. The file on disk is untouched.
 func handleBrowseForget(w http.ResponseWriter, r *http.Request, db *statedb.DB) {
-	back := browseReturn(r.FormValue("return"))
+	back := browseReturn(r.FormValue("tab"))
 	sha := strings.TrimSpace(r.FormValue("sha256"))
 	if sha == "" {
 		redirectBrowse(w, r, back, "", "no file was named")
