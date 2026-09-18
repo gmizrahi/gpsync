@@ -117,6 +117,12 @@ type statisticsPageData struct {
 
 	ByYear            []statYearBar
 	YearChartHasOlder bool
+	// FixableDates is how many rows FixDates would correct, from a
+	// dry run on every page load -- the button says what it would do
+	// before anyone presses it. Message/ErrorMessage report a pass.
+	FixableDates int
+	Message      string
+	ErrorMessage string
 
 	// Forecast* back the "Sync progress" card -- completeness plus a
 	// finish date projected from MEASURED throughput, which matters here
@@ -213,7 +219,7 @@ func activityBar(label, value, title string, v, max float64) statActivityBar {
 	}
 }
 
-func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activity engine.ActivityGranularity) (string, error) {
+func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activity engine.ActivityGranularity, msg, errMsg string) (string, error) {
 	s, err := engine.BuildStatistics(db)
 	if err != nil {
 		return "", err
@@ -224,6 +230,14 @@ func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activi
 		TotalBytes:     humanBytes(s.TotalBytes),
 		AvgBytes:       humanBytes(int64(s.AvgBytes)),
 		ExtensionCount: fmt.Sprintf("%d", s.ExtensionCount),
+		Message:        msg,
+		ErrorMessage:   errMsg,
+	}
+	// A dry run, so the button can say how many rows it would correct
+	// before anyone presses it. Best-effort: a failure here must not stop
+	// the whole page rendering over a count only this one card needs.
+	if dry, err := engine.FixDates(db, true); err == nil {
+		data.FixableDates = dry.Fixed
 	}
 	if s.ExtensionCount > len(s.ByExtCount) {
 		data.ExtTableNote = fmt.Sprintf("Showing the top %d of %d extensions.", len(s.ByExtCount), s.ExtensionCount)
@@ -501,6 +515,14 @@ var statisticsTmpl = template.Must(template.New("statistics").Parse(`
   <div class="chart-tap" aria-live="polite"></div>
   <div class="hint">{{if .YearChartHasOlder}}"Older" folds every year before this window together. {{end}}Years come from a folder/filename date when the path has one (more reliable than file metadata), otherwise the capture date on file; "Unknown" is whatever's left with neither.</div>
   {{else}}<div class="hint">Nothing tracked yet.</div>{{end}}
+  {{if .Message}}<div class="banner banner-ok">{{.Message}}</div>{{end}}
+  {{if .ErrorMessage}}<div class="banner banner-err">{{.ErrorMessage}}</div>{{end}}
+  {{if .FixableDates}}
+  <form method="post" action="/statistics/fix-dates">
+    <div class="hint">{{.FixableDates}} file(s) have a capture year that disagrees with their folder or filename, usually because a backup or re-sync moved the file's timestamp long after the photo was taken. Correcting them changes only what gpsync recorded; the files are not touched.</div>
+    <button type="submit">Fix {{.FixableDates}} capture date(s)</button>
+  </form>
+  {{end}}
 </div>
 
 <div class="status-columns">

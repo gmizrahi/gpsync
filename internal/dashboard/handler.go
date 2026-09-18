@@ -199,7 +199,8 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		// client-side state to get out of sync with what's displayed, and
 		// each view is a shareable, bookmarkable URL.
 		activity := engine.ParseActivityGranularity(r.URL.Query().Get("activity"))
-		page, err := renderStatisticsPage(db, wc.Config().Theme, wc.Config().DashboardAuthEnabled, activity)
+		page, err := renderStatisticsPage(db, wc.Config().Theme, wc.Config().DashboardAuthEnabled, activity,
+			r.URL.Query().Get("fixed"), r.URL.Query().Get("error"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -254,6 +255,13 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 			return
 		}
 		handleSignInImportRclone(w, r, db, wc)
+	})
+	mux.HandleFunc("/statistics/fix-dates", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleFixDates(w, r, db)
 	})
 	mux.HandleFunc("/browse/recheck", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
