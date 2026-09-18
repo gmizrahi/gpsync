@@ -74,7 +74,7 @@ func TestRenderOriginalsPage_NextIndexWrapsToZero(t *testing.T) {
 	// parent sibling), so it stays in needs_review for this test to see.
 	mustNoErr(t, db.EnsureNeedsReview("hash-only", 50, "image/jpeg", filepath.Join(t.TempDir(), "originals", "solo.jpg"), nil))
 
-	page, err := renderOriginalsPage(db, config.Defaults(), 0, "")
+	page, err := renderOriginalsPage(db, config.Defaults(), 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,7 @@ func TestRenderOriginalsPage_AlreadyUploadedSection(t *testing.T) {
 	mustNoErr(t, db.UpsertFileSeen(path, "hash-up", 0, 250))
 	mustNoErr(t, db.MarkUploaded("hash-up", "media-123", ""))
 
-	page, err := renderOriginalsPage(db, config.Defaults(), 0, "")
+	page, err := renderOriginalsPage(db, config.Defaults(), 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestRenderOriginalsPage_NothingUploadedFromOriginals_SectionAbsent(t *testi
 	mustNoErr(t, db.UpsertFileSeen("/lib/2024/normal.jpg", "hash-normal", 0, 10))
 	mustNoErr(t, db.MarkUploaded("hash-normal", "media-1", ""))
 
-	page, err := renderOriginalsPage(db, config.Defaults(), 0, "")
+	page, err := renderOriginalsPage(db, config.Defaults(), 0, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

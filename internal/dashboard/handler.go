@@ -256,6 +256,13 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		}
 		handleSignInImportRclone(w, r, db, wc)
 	})
+	mux.HandleFunc("/originals/clean", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleCleanOriginals(w, r, db)
+	})
 	mux.HandleFunc("/statistics/fix-dates", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -353,7 +360,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 	mux.HandleFunc("/originals", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		index, _ := strconv.Atoi(q.Get("i"))
-		page, err := renderOriginalsPage(db, wc.Config(), index, q.Get("error"))
+		page, err := renderOriginalsPage(db, wc.Config(), index, q.Get("error"), q.Get("cleaned"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
