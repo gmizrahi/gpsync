@@ -1,4 +1,4 @@
-# gpsync
+# GPhotos Sync
 
 Sync local photo and video folders to Google Photos, from the command line or
 a Windows tray app — with a ledger that knows exactly what has been uploaded,
