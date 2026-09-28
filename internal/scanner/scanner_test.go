@@ -734,3 +734,94 @@ func TestScanFolders_FilteredOutFileIsNotMissing(t *testing.T) {
 		t.Errorf("Missing = %d, want 0 -- the video still exists, it was only filtered out of this scan", sum.Missing)
 	}
 }
+
+// TestScanFolders_FileGrowingWhileHashedGetsNoLedgerRow locks in the fix for
+// issue #30. The scanner stats every file in one pass, then hashes it in a
+// second pass. A file still being copied (a phone over MTP, a network drive)
+// changes between the two, and the bug was that the recorded size/mtime came
+// from the first stat while the digest covered the bytes read during the
+// second -- a pair describing a file state that never existed on disk, which
+// then got uploaded as if it were a complete file.
+//
+// The growth is driven from statFn so the test is deterministic: the stat
+// pass sees the short file, and the file is extended before hashing reads it.
+func TestScanFolders_FileGrowingWhileHashedGetsNoLedgerRow(t *testing.T) {
+	db := openTestDB(t)
+	root := t.TempDir()
+	path := filepath.Join(root, "still-copying.jpg")
+	writeFile(t, path, []byte("partial"))
+
+	realStat := statFn
+	var grown atomic.Bool
+	statFn = func(name string) (os.FileInfo, error) {
+		info, err := realStat(name)
+		// Right after the stat pass reads this file, append to it. The
+		// hashing pass therefore digests more bytes than the stat saw.
+		if err == nil && name == path && grown.CompareAndSwap(false, true) {
+			f, oerr := os.OpenFile(name, os.O_APPEND|os.O_WRONLY, 0o644)
+			if oerr == nil {
+				_, _ = f.WriteString("...the rest of the file arrives")
+				_ = f.Close()
+			}
+		}
+		return info, err
+	}
+	t.Cleanup(func() { statFn = realStat })
+
+	summary, err := ScanFolders(db, []string{root}, "manual_scan", 1, false, true, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if summary.Unsettled != 1 {
+		t.Errorf("Unsettled = %d, want 1 (the file changed while being hashed)", summary.Unsettled)
+	}
+	if summary.NewPending != 0 {
+		t.Errorf("NewPending = %d, want 0: a file still being copied must not earn a ledger row", summary.NewPending)
+	}
+
+	// The decisive assertion: nothing was recorded for the in-flux file, so
+	// no row can carry a size that disagrees with its own hash.
+	if seen, err := db.GetFileSeen(path); err != nil {
+		t.Fatal(err)
+	} else if seen != nil {
+		t.Errorf("scan cache recorded %s (size=%d sha=%s); an unsettled file must be left for a later scan",
+			path, seen.Size, seen.SHA256)
+	}
+	pending, err := db.ListPending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("ListPending = %d rows, want 0; a partially copied file must never be queued for upload", len(pending))
+	}
+}
+
+// TestScanFolders_StableFileStillRecordsHashAndSize is the control for the
+// test above: the settle check must not reject files that are simply sitting
+// still, and the recorded size must come from the verified post-hash stat.
+func TestScanFolders_StableFileStillRecordsHashAndSize(t *testing.T) {
+	db := openTestDB(t)
+	root := t.TempDir()
+	path := filepath.Join(root, "settled.jpg")
+	body := []byte("a complete file that nobody is writing to")
+	writeFile(t, path, body)
+
+	summary, err := ScanFolders(db, []string{root}, "manual_scan", 1, false, true, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Unsettled != 0 {
+		t.Errorf("Unsettled = %d, want 0 for a file that never changed", summary.Unsettled)
+	}
+	seen, err := db.GetFileSeen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen == nil {
+		t.Fatal("a settled file must be recorded in the scan cache")
+	}
+	if seen.Size != int64(len(body)) {
+		t.Errorf("recorded size = %d, want %d (the size the digest actually covers)", seen.Size, len(body))
+	}
+}
