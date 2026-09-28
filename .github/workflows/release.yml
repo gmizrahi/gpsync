@@ -17,6 +17,29 @@ permissions:
   contents: read
 
 jobs:
+  # The gate. ci.yml deliberately skips engine, uploader and statedb on Windows
+  # on the PR path -- 859s of packages with no OS-specific code -- so that a
+  # pull request is not waiting 8-25m for them. A release is where that
+  # shortcut has to be paid back: nothing publishes unless the WHOLE suite has
+  # passed on Windows for this exact commit.
+  #
+  # It runs alongside build/installer rather than in front of them, so the
+  # release is not serialised behind it; the `release` job needs it, so a
+  # failure here means no draft and no assets, whatever the packaging jobs did.
+  #
+  # 45m, not 30m: full suite, slowest runner, and a bad night has taken 25m41s.
+  windows-full-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./... -count=1 -timeout 45m
+
   # Everything except the Windows installer. gpsync has no cgo, so the Windows
   # binaries cross-compile here too and the installer job only has to package
   # them.
@@ -89,7 +112,7 @@ jobs:
           retention-days: 7
 
   release:
-    needs: [build, installer]
+    needs: [build, installer, windows-full-test]
     runs-on: ubuntu-latest
     permissions:
       contents: write # creating the release
