@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -1610,22 +1611,43 @@ func TestUploader_Run_SuccessEventsCarryNoErrorMessage(t *testing.T) {
 // runs (defers fire only once the send statement has returned), so with an
 // unbuffered results channel a finished worker sat blocked on the send while
 // still holding its concurrency slot. The drain loop is unavailable for the
-// whole of flush() -- three sequential network round-trips -- so every
-// worker that finished during a flush froze with it, and no new file could
-// start. Buffering the channel to the concurrency limit lets the hand-off
+// whole of flush(), so every worker that finished during a flush froze with
+// it, and no new file could start. Buffering the channel lets the hand-off
 // complete immediately and frees the slot right away.
+//
+// The test decides when uploads COMPLETE, instead of racing the scheduler.
+// It used to let the fake server answer as fast as it could and wait for a
+// start to land inside a flush, which made it depend on the relative speed
+// of the workers and the drain loop -- and with an in-process server and
+// -race slowing the drain loop's per-file SQLite writes, the workers won:
+// instrumenting the dispatcher showed the results buffer already FULL
+// (4/4) when flushes began, every worker parked on its send, and dispatch
+// correctly waiting on the bottleneck. That is back-pressure, not the bug
+// this test exists for, and it failed CI once (#44).
+//
+// So: the first batchFlushCount uploads complete freely, and every later one
+// blocks inside the fake server until the test releases it. The first flush
+// then waits until all `concurrency` slots are held by parked workers, so it
+// opens with exactly batchFlushCount results drained, the buffer EMPTY, and
+// no slot free. Inside that flush the test releases ONE worker. Buffered, it hands off, frees its
+// slot, and the next file starts. Unbuffered, it blocks on the send while
+// holding the slot, and nothing starts. The outcome depends on the channel's
+// semantics, not on timing.
 func TestUploader_Run_WorkersKeepDispatchingDuringABatchFlush(t *testing.T) {
 	const concurrency = 4
 	var mu sync.Mutex
 	inFlush := false
 	startsDuringFlush := 0
-	// Signalled the first time a file starts uploading while a batchCreate
-	// flush is still in progress. The flush waits on this rather than
-	// sleeping a fixed window: an assertion about an observed interleaving is
-	// otherwise only as reliable as the scheduler under whatever else the
-	// machine is doing, and this one failed exactly once under -race with the
-	// full suite running in parallel, while passing in isolation.
 	startedDuringFlush := make(chan struct{}, 1)
+
+	// The completion gate. release hands out one completion at a time;
+	// openAll lets everything through once the held flush is over.
+	var completions atomic.Int64
+	release := make(chan struct{}, 1)
+	openAll := make(chan struct{})
+	var openOnce sync.Once
+	open := func() { openOnce.Do(func() { close(openAll) }) }
+	var flushes atomic.Int64
 
 	mux := http.NewServeMux()
 	var srv *httptest.Server
@@ -1644,34 +1666,64 @@ func TestUploader_Run_WorkersKeepDispatchingDuringABatchFlush(t *testing.T) {
 	})
 	mux.HandleFunc("/upload-session", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		if completions.Add(1) > batchFlushCount {
+			select {
+			case <-release:
+			case <-openAll:
+			}
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write(body)
 	})
 	mux.HandleFunc("/v1/mediaItems:batchCreate", func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		inFlush = true
-		mu.Unlock()
-		// Hold the flush open until a file actually starts uploading, rather
-		// than sleeping a fixed window and hoping one lands inside it.
-		//
-		// Deliberately ONE start, not `concurrency` of them: a stricter
-		// threshold was tried and reverted, because under -race on a loaded
-		// runner it reports zero and fails a pipeline that is working. The
-		// honest scope of this test is "dispatch is not frozen for the whole
-		// of every flush"; it is not a proof that throughput is maintained,
-		// and making the unbuffered-results regression fail it has never
-		// been demonstrated.
-		select {
-		case <-startedDuringFlush:
-		case <-time.After(5 * time.Second):
+		// Only the first flush is held; it is the one guaranteed to start
+		// with files still waiting to be dispatched. Later ones answer at
+		// once, so a passing run does not sit out a fallback on a final
+		// flush that has nothing left to start.
+		if flushes.Add(1) == 1 {
+			// Wait until every slot is held by a worker parked in the
+			// gate. Without this, the slot freed by the hand-off of the
+			// very result that triggered this flush can let a file start
+			// while the flush is already open -- buffered or not -- and
+			// the test then passes against the regression it exists to
+			// catch (it did, 1 run in 3, before this wait). Once all
+			// `concurrency` workers are parked, nothing can start unless
+			// the one worker released below manages to hand off.
+			parked := false
+			for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+				if completions.Load() >= batchFlushCount+concurrency {
+					parked = true
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if !parked {
+				t.Errorf("setup: only %d uploads reached the fake server, want %d parked behind the first %d",
+					completions.Load()-batchFlushCount, concurrency, batchFlushCount)
+			}
+			mu.Lock()
+			inFlush = true
+			mu.Unlock()
+			release <- struct{}{} // let exactly one parked worker finish
+			// Generous on purpose: correct code signals within
+			// milliseconds, so this bound is never reached on the correct
+			// path. Only a frozen pipeline sits it out.
+			select {
+			case <-startedDuringFlush:
+			case <-time.After(30 * time.Second):
+			}
+			mu.Lock()
+			inFlush = false
+			mu.Unlock()
+			open()
 		}
-		mu.Lock()
-		inFlush = false
-		mu.Unlock()
 		batchCreateOKHandler(w, r)
 	})
 	srv = httptest.NewServer(mux)
-	defer srv.Close()
+	// LIFO: the gate opens before the server closes, so a handler parked
+	// on it can never keep srv.Close waiting if the run fails early.
+	t.Cleanup(srv.Close)
+	t.Cleanup(open)
 
 	origUploadURL, origBatchURL := uploadURL, batchCreateURL
 	uploadURL = srv.URL + "/v1/uploads"
@@ -1680,8 +1732,8 @@ func TestUploader_Run_WorkersKeepDispatchingDuringABatchFlush(t *testing.T) {
 
 	db := openTestDB(t)
 	dir := t.TempDir()
-	// Comfortably more than batchFlushCount, so a flush happens with plenty
-	// of files still waiting to be dispatched.
+	// Comfortably more than batchFlushCount, so the held flush happens with
+	// plenty of files still waiting to be dispatched.
 	for i := 0; i < batchFlushCount*2+10; i++ {
 		name := fmt.Sprintf("f%03d.jpg", i)
 		p := writeFile(t, dir, name, []byte(name))
@@ -1703,7 +1755,7 @@ func TestUploader_Run_WorkersKeepDispatchingDuringABatchFlush(t *testing.T) {
 	got := startsDuringFlush
 	mu.Unlock()
 	if got == 0 {
-		t.Error("no file started uploading while a batchCreate flush was in progress -- dispatch is frozen for the whole of every flush")
+		t.Error("no file started uploading while a batchCreate flush was in progress -- a worker that finished during the flush kept its slot, so dispatch froze for the whole flush")
 	}
 }
 
