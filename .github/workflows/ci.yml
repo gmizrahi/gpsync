@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The nightly full-Windows run below. Also manual, so it can be exercised
+  # without waiting a day.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -53,14 +58,61 @@ jobs:
 
       - run: go build ./...
       - run: go vet ./...
-      # 30m, not go test's 10m default. internal/engine runs ~400s on the
-      # Windows runner against ~7s on Linux -- the package hashes a
-      # multi-gigabyte decoy file to prove scan and upload overlap, and that
-      # is disk-bound. At 400s it was already using two thirds of the
-      # default budget, so an ordinary slow run tripped it on a commit that
-      # changed no code at all. The tests are not stuck; the budget was too
-      # close to the real cost.
-      - run: go test ./... -count=1 -timeout 30m
+
+      # 30m, not go test's 10m default: the Windows runner is slow and wildly
+      # variable (the same commit has taken 7m19s and 25m41s), so a budget
+      # close to the typical cost fails runs that changed no code at all.
+      - name: Test
+        if: runner.os != 'Windows'
+        run: go test ./... -count=1 -timeout 30m
+
+      # Windows is 8-25m against ~1m on Linux, and most of that is spent on
+      # packages whose behaviour cannot differ by OS: engine, uploader and
+      # statedb were 859s between them, and contain ZERO files with a
+      # windows/!windows build tag or a runtime.GOOS check. They are Go over
+      # SQLite and HTTP. Skipping them here is the same argument the race job
+      # already makes for being Linux-only.
+      #
+      # This is a DENYLIST on purpose. An allowlist would silently drop a new
+      # package off the Windows path the day it was added; with a denylist,
+      # anything new is covered on Windows until someone deliberately excludes
+      # it.
+      #
+      # These three are not abandoned: the full suite still runs on Windows
+      # nightly (windows-full below) and, blocking, before any release
+      # publishes (release.yml). The coverage moved off the PR path, it did
+      # not go away. statedb is the one that gives most pause -- SQLite file
+      # locking genuinely is OS-specific even with no build tags in the
+      # package -- which is exactly why the release gate blocks rather than
+      # merely warns.
+      - name: Test (OS-sensitive packages only)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pkgs=$(go list ./... | grep -vE '/internal/(engine|uploader|statedb)$')
+          echo "Running on Windows:"; echo "$pkgs" | sed 's/^/  /'
+          go test $pkgs -count=1 -timeout 30m
+
+  # The Windows half of the PR-path bargain. The test job above skips engine,
+  # uploader and statedb on Windows so a pull request is not waiting 8-25m on
+  # packages that have no OS-specific code; this runs the whole suite there,
+  # nightly, so a Windows-only regression in one of them surfaces within a day
+  # instead of at release time. release.yml runs the same thing as a blocking
+  # gate before anything publishes.
+  #
+  # 45m, not 30m: this is the full suite on the slowest runner, and a bad
+  # night has already taken 25m41s.
+  windows-full:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - run: go build ./...
+      - run: go test ./... -count=1 -timeout 45m
 
   # The upload pipeline is concurrent throughout: a circuit breaker and an
   # adaptive limiter shared across goroutines, plus the watch loop. Two real
