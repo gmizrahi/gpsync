@@ -188,3 +188,83 @@ func TestNew_MissingRootReturnsError(t *testing.T) {
 		t.Fatal("New() with a nonexistent root = nil error, want one")
 	}
 }
+
+// TestWatcher_PopulatedFolderMovedInIsScanned covers the case a copy does not:
+// a folder moved (renamed) into a watched root arrives as ONE atomic event and
+// its files produce no events of their own, because they were never created
+// inside the watched tree. Adding a watch to the new directory is not enough --
+// without a scan signal nothing ever looks inside it, and the files stay
+// invisible until an unrelated manual scan happens to run.
+func TestWatcher_PopulatedFolderMovedInIsScanned(t *testing.T) {
+	root := t.TempDir()
+	// Staged OUTSIDE the watched root, then renamed in, so no create event
+	// is ever generated for the file itself.
+	staging := t.TempDir()
+	src := filepath.Join(staging, "Vesuvius")
+	mustWriteFile(t, filepath.Join(src, "20260921_162919.mp4"), []byte("video bytes"))
+
+	w, err := New([]string{root}, testDebounce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	dst := filepath.Join(root, "Vesuvius")
+	if err := os.Rename(src, dst); err != nil {
+		t.Skipf("cannot rename across these temp dirs: %v", err)
+	}
+
+	if got := waitReady(t, w); got != dst {
+		t.Errorf("Ready() = %q, want %q (the moved-in folder must be scanned)", got, dst)
+	}
+}
+
+// TestWatcher_MovedInSubfoldersAreEachScanned is the nested version: a whole
+// tree moved in at once must signal every folder that actually holds files,
+// not just the top one.
+func TestWatcher_MovedInSubfoldersAreEachScanned(t *testing.T) {
+	root := t.TempDir()
+	staging := t.TempDir()
+	src := filepath.Join(staging, "Italy")
+	mustWriteFile(t, filepath.Join(src, "top.jpg"), []byte("a"))
+	mustWriteFile(t, filepath.Join(src, "Vesuvius", "deep.jpg"), []byte("b"))
+
+	w, err := New([]string{root}, testDebounce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	dst := filepath.Join(root, "Italy")
+	if err := os.Rename(src, dst); err != nil {
+		t.Skipf("cannot rename across these temp dirs: %v", err)
+	}
+
+	want := map[string]bool{dst: true, filepath.Join(dst, "Vesuvius"): true}
+	got := map[string]bool{}
+	for range want {
+		got[waitReady(t, w)] = true
+	}
+	for folder := range want {
+		if !got[folder] {
+			t.Errorf("no Ready() for %q; got %v", folder, got)
+		}
+	}
+}
+
+// TestWatcher_InitialRootsDoNotSignalAScan guards the other side of the fix:
+// the scan signal must apply only to trees that appear after the watch is
+// running. Signalling the initial roots would make merely starting the tray
+// rescan every source folder.
+func TestWatcher_InitialRootsDoNotSignalAScan(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "Existing", "already-here.jpg"), []byte("x"))
+
+	w, err := New([]string{root}, testDebounce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	assertNoReady(t, w, 5*testDebounce)
+}

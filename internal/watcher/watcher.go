@@ -67,7 +67,7 @@ func New(roots []string, debounce time.Duration) (*Watcher, error) {
 	var lastErr error
 	watchedAny := false
 	for _, root := range roots {
-		if err := w.addTree(root); err != nil {
+		if err := w.addTree(root, false); err != nil {
 			lastErr = err
 			w.reportErr(err)
 			continue
@@ -124,7 +124,10 @@ func (w *Watcher) Close() error {
 // dynamically, for a directory the watcher sees created later -- e.g. an
 // entire populated folder copied or moved in at once (xcopy, drag-and-drop)
 // needs every one of ITS subdirectories watched too, not just itself.
-func (w *Watcher) addTree(root string) error {
+// signalScan tells addTree to request a scan of every folder in the tree
+// that holds at least one non-ignored file. Only meaningful for a tree that
+// appeared after the watch was already running: see handleEvent.
+func (w *Watcher) addTree(root string, signalScan bool) error {
 	// The root itself failing (doesn't exist, not a directory, no
 	// permission) is a real per-root failure -- distinct from a failure
 	// found partway through the walk, which stays best-effort below.
@@ -144,6 +147,16 @@ func (w *Watcher) addTree(root string) error {
 			return nil
 		}
 		if !d.IsDir() {
+			// A folder MOVED in (rather than copied in) arrives as one
+			// atomic rename: its files were never created inside the
+			// watched tree, so they produce no events of their own, ever.
+			// Adding a watch is not enough -- nothing would ever ask for
+			// this folder to be scanned. Debounce the folder each file
+			// sits in; resetTimer dedupes per folder and the debounce
+			// collapses a whole tree into one signal per folder.
+			if signalScan && !scanner.IsIgnoredFileName(d.Name()) {
+				w.resetTimer(filepath.Dir(path))
+			}
 			return nil
 		}
 		// Never skip the root itself, even if its own name happens to
@@ -211,11 +224,15 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 	// first, so Ready() reported the root before the real file event could
 	// report the leaf, and gpsync rescanned the entire root over one edit.
 	if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-		// A newly created directory still needs watching; whatever lands
-		// inside it then generates its own events (and now that it is
-		// watched, gpsync sees them).
+		// A newly appeared directory still needs watching; whatever lands
+		// inside it AFTER this point generates its own events. Anything
+		// already inside it does not -- fsnotify maps both IN_MOVED_TO and
+		// FILE_ACTION_RENAMED_NEW_NAME to Create, so a populated folder
+		// moved in from elsewhere on the volume shows up here as a single
+		// event with no per-file events to follow. addTree therefore also
+		// requests a scan of the folders that already hold files.
 		if ev.Has(fsnotify.Create) && !scanner.IsIgnoredDirName(base) {
-			if err := w.addTree(ev.Name); err != nil {
+			if err := w.addTree(ev.Name, true); err != nil {
 				w.reportErr(err)
 			}
 		}
