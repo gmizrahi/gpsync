@@ -4,10 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
-  # The nightly full-Windows run below. Also manual, so it can be exercised
-  # without waiting a day.
-  schedule:
-    - cron: "17 3 * * *"
+  # Manual, so the full-Windows run below can be exercised on any branch.
+  # Deliberately NO schedule: the full Windows suite runs on the changelog PR
+  # and on the release tag, which is where a result can still stop a release
+  # -- not on a timer nobody is watching.
   workflow_dispatch:
 
 permissions:
@@ -79,8 +79,8 @@ jobs:
       # it.
       #
       # These three are not abandoned: the full suite still runs on Windows
-      # nightly (windows-full below) and, blocking, before any release
-      # publishes (release.yml). The coverage moved off the PR path, it did
+      # on every changelog PR (windows-full below) and, blocking, on the
+      # release tag (release.yml). The coverage moved off the PR path, it did
       # not go away. statedb is the one that gives most pause -- SQLite file
       # locking genuinely is OS-specific even with no build tags in the
       # package -- which is exactly why the release gate blocks rather than
@@ -94,16 +94,19 @@ jobs:
           go test $pkgs -count=1 -timeout 30m
 
   # The Windows half of the PR-path bargain. The test job above skips engine,
-  # uploader and statedb on Windows so a pull request is not waiting 8-25m on
-  # packages that have no OS-specific code; this runs the whole suite there,
-  # nightly, so a Windows-only regression in one of them surfaces within a day
-  # instead of at release time. release.yml runs the same thing as a blocking
-  # gate before anything publishes.
+  # uploader and statedb on Windows so an ordinary pull request is not waiting
+  # 8-25m on packages that have no OS-specific code; this runs the whole suite
+  # there on the CHANGELOG PR -- every release is cut from a release/* branch
+  # -- so a Windows-only regression in one of them is caught before the tag
+  # exists, while it can still be fixed on a branch. release.yml runs the same
+  # thing again as a blocking gate on the tag itself.
   #
   # 45m, not 30m: this is the full suite on the slowest runner, and a bad
-  # night has already taken 25m41s.
+  # run has already taken 25m41s.
   windows-full:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
