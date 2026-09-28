@@ -344,6 +344,10 @@ type ScanSummary struct {
 	// StaleCache counts scan-cache entries dropped for paths that no
 	// longer exist.
 	StaleCache int
+	// Unsettled counts files skipped because they changed while being
+	// hashed -- a copy still in progress. They get no ledger row at all,
+	// so the next scan picks them up once they are quiet.
+	Unsettled int
 }
 
 // wasNewlyRegistered reports whether this hash's ledger entry meaningfully
@@ -414,6 +418,10 @@ type hashJob struct {
 	size       int64
 	mtime      float64
 	err        error
+	// unsettled means the file changed while we were reading it, so the
+	// digest and the stat describe two different states of the file and
+	// neither may be recorded. See the re-stat in the hashing worker.
+	unsettled bool
 }
 
 // ScanFolders walks patterns, hashes every file no previous scan has
@@ -572,7 +580,7 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 			defer wg.Done()
 			for p := range jobs {
 				inFlight.start(p)
-				info := statCache[p]
+				before := statCache[p]
 				digest, err := hashing.SHA256File(p)
 				if err != nil {
 					inFlight.finish(p)
@@ -580,13 +588,27 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 					continue
 				}
 				capturedAt := captureDate(p)
+				// The size/mtime above come from the earlier stat pass, but
+				// the digest covers whatever was on disk just now. A file
+				// still being written (a phone copying over MTP, a network
+				// drive) changes in between, and pairing a stale size with a
+				// fresh digest describes a file state that never existed --
+				// which then gets uploaded as if it were complete. Re-stat
+				// and require both to be unchanged before anything is
+				// recorded; report the file as unsettled otherwise so a
+				// later scan handles it once the copy has finished.
+				after, statErr := statFn(p)
 				inFlight.finish(p)
+				if statErr != nil || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+					results <- hashJob{path: p, unsettled: true}
+					continue
+				}
 				results <- hashJob{
 					path:       p,
 					digest:     digest,
 					capturedAt: capturedAt,
-					size:       info.Size(),
-					mtime:      float64(info.ModTime().UnixNano()) / 1e9,
+					size:       after.Size(),
+					mtime:      float64(after.ModTime().UnixNano()) / 1e9,
 				}
 			}
 		}()
@@ -602,6 +624,10 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 	for job := range results {
 		filesDone++
 		if job.err != nil {
+			continue
+		}
+		if job.unsettled {
+			summary.Unsettled++
 			continue
 		}
 		if err := db.UpsertFileSeen(job.path, job.digest, job.mtime, job.size); err != nil {
