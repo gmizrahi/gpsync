@@ -31,6 +31,7 @@ Two bug fixes, both about files the scan got wrong.
 
 - `modernc.org/sqlite` 1.58.0 → 1.59.0. (#29)
 
+## [0.3.2]
 
 A bug fix: backups to a cloud-sync drive failed outright.
 
