@@ -27,6 +27,30 @@ jobs:
         with:
           go-version: stable
           check-latest: true
+      # Defender scans every file the toolchain and the tests write, and a Go
+      # test suite writes a great many small ones: each test opens a fresh
+      # SQLite database in its own t.TempDir. That overhead is most of why
+      # this job runs 8-10m against ~1m15s on ubuntu -- internal/statedb alone
+      # was 349s against 8s on Linux, 44x, with no large files and no sleeps in
+      # the package at all. Excluding the paths involved costs nothing
+      # here: the runner is ephemeral and is destroyed after the job, so this
+      # is not the same trade-off as disabling it on a real machine.
+      #
+      # Best-effort on purpose. Add-MpPreference needs elevation and Defender
+      # may be absent or already managed by policy on a future image; a
+      # failure here should slow the job down, not fail it.
+      - name: Exclude the build and test paths from Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          foreach ($p in @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, (go env GOCACHE), (go env GOMODCACHE))) {
+            if ($p) { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue }
+          }
+          Add-MpPreference -ExclusionProcess 'go.exe' -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionProcess 'compile.exe' -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionProcess 'link.exe' -ErrorAction SilentlyContinue
+
       - run: go build ./...
       - run: go vet ./...
       # 30m, not go test's 10m default. internal/engine runs ~400s on the
