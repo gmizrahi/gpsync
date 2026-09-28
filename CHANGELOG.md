@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3]
+
+Two bug fixes, both about files the scan got wrong.
+
+### Fixed
+
+- **A file still being copied is no longer recorded, or uploaded, half
+  written.** The scan took a file's size from one pass and hashed its bytes in
+  another, so a file still arriving -- from a phone over MTP, or a network
+  drive -- could be recorded as a state that never existed on disk and uploaded
+  incomplete. The watcher's debounce didn't prevent it: an MTP copy routinely
+  pauses longer than the debounce in mid-transfer. The scan now re-checks the
+  file after hashing and records nothing if it changed; the next scan picks it
+  up once the copy is done. (#30, #31)
+- **A folder moved into a source folder is now scanned.** It was watched for
+  future changes, but the files already inside it were never scanned. Moving a
+  folder on the same drive is a rename, and a rename produces no event for the
+  files inside, so they stayed invisible until some unrelated full scan
+  happened to run. A folder *copied* in was unaffected. (#34, #35)
+
+### Changed
+
+- `modernc.org/sqlite` 1.58.0 → 1.59.0. (#29)
+
 ## [0.3.2]
 
 A bug fix: backups to a cloud-sync drive failed outright.
@@ -234,7 +258,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/gmizrahi/gpsync/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/gmizrahi/gpsync/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/gmizrahi/gpsync/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/gmizrahi/gpsync/compare/v0.2.0...v0.3.0
