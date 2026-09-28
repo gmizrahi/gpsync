@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,19 @@ import (
 // cause. Skips (doesn't fail) if `node` isn't on PATH, since this is the
 // one test in this package with an external tool dependency.
 func TestStatusPageJS_RefreshDoesNotThrow(t *testing.T) {
+	// Not on Windows. The script is plain browser JavaScript run under
+	// Node, and nothing it does can differ by OS -- the same argument the
+	// race job makes for being Linux-only. It still runs on every pull
+	// request, on ubuntu and macOS.
+	//
+	// What Windows added was only a way to fail: node was given a fixed
+	// budget, and a runner running every package ~2.7x slow (#39) blew it
+	// and turned main red on a commit that touched none of this. The cost
+	// is removed rather than hidden behind a bigger number.
+	if runtime.GOOS == "windows" {
+		t.Skip("the page's JS is OS-independent and is covered on ubuntu/macOS; see #39")
+	}
+
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not found on PATH -- skipping JS execution smoke test")
