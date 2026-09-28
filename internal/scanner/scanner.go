@@ -28,6 +28,11 @@ import (
 // instead of really waiting" pattern as internal/uploader's sleepFn/waitFn.
 var statFn = os.Stat
 
+// hashFileFn is hashing.SHA256File, indirected for the same reason as statFn:
+// a test needs to control how long hashing takes without depending on how
+// fast the machine's disk is. See SetHashFileForTest.
+var hashFileFn = hashing.SHA256File
+
 // ignoreNames are files, never real photo/video content, skipped wherever found.
 var ignoreNames = map[string]bool{
 	"thumbs.db": true, "desktop.ini": true, ".ds_store": true,
@@ -581,7 +586,7 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 			for p := range jobs {
 				inFlight.start(p)
 				before := statCache[p]
-				digest, err := hashing.SHA256File(p)
+				digest, err := hashFileFn(p)
 				if err != nil {
 					inFlight.finish(p)
 					results <- hashJob{path: p, err: err}
