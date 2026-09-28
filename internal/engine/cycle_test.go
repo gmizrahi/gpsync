@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/gmizrahi/gpsync/internal/extensions"
 	"github.com/gmizrahi/gpsync/internal/hashing"
 	"github.com/gmizrahi/gpsync/internal/quota"
+	"github.com/gmizrahi/gpsync/internal/scanner"
 	"github.com/gmizrahi/gpsync/internal/uploader"
 )
 
@@ -172,38 +174,41 @@ func TestRunFolderCycle_FailedRetryableWithNothingElsePending_StillAttemptsUploa
 	}
 }
 
-// TestRunFolderCycle_UploadStartsWithoutWaitingForScanToFinish is the
-// actual concurrency fix: "why do you wait before your scan gets to the
-// folder; start the upload right away, the scan and queueing of new
-// discovered files should be done in a parallel thread." Proves it with
-// real timing, not just call ordering: the folder has one file already
-// pending from an earlier run (so the upload loop has real work on its
-// very first pass, before the scan goroutine has reported anything) PLUS a
-// large (2GB) decoy file the scan has to actually hash. uploader.New fails
-// FAST in this test environment (a plain missing-credentials-file error,
-// no network round-trip -- see TestRunFolderCycle_PendingWork_
-// StillAttemptsUpload), so RunFolderCycle returning well under the decoy
-// file's own hash time is only possible if the upload loop's first
-// uploader.New call fired before -- not after -- the scan finished hashing
-// it.
+// TestRunFolderCycle_UploadStartsWithoutWaitingForScanToFinish proves the
+// upload phase begins before the scan phase has finished, which is the whole
+// point of RunFolderCycle running the two concurrently.
 //
-// Sized with real margin after two smaller attempts (200MB, then 600MB)
-// turned out FLAKY against the OLD sequential RunFolderCycle -- both
-// occasionally finished hashing fast enough (page cache, an unloaded
-// machine) to sneak in under a few-hundred-ms threshold even without the
-// fix, which would have made this a test that mostly, not reliably,
-// caught a regression. 2GB (~1.5-2s to hash, extrapolated from a ~470ms/
-// 600MB benchmark) against a 500ms assertion leaves real headroom on both
-// sides: the concurrent (fixed) path never touches the decoy before
-// returning, so it stays in the low single-digit ms regardless of size.
+// The scan is made slow by blocking the hash function, not by staging a file
+// big enough that hashing it really takes time. The previous version wrote a
+// 2 GB file and asserted RunFolderCycle returned in under 500ms. Correct in
+// spirit, but expensive and only probabilistically right: its own comment
+// recorded that 200MB and then 600MB had both been tried and were FLAKY,
+// because a warm page cache on an unloaded machine hashed them fast enough to
+// pass even against the sequential code the test existed to catch. It also
+// cost ~380s of the ~466s Windows CI wall time and allocated 2 GiB of RAM.
+//
+// Blocking the hash inverts the logic: the scan cannot finish until this test
+// allows it, so a RunFolderCycle that returns at all has necessarily not
+// waited for it. No timing assumption, no large file, and it fails on a
+// regression every time rather than most times.
 func TestRunFolderCycle_UploadStartsWithoutWaitingForScanToFinish(t *testing.T) {
 	db := openTestDB(t)
 	dir := t.TempDir()
 
+	// A real file, but tiny -- what makes the scan slow is the hash hook.
 	decoy := filepath.Join(dir, "decoy.dat")
-	if err := os.WriteFile(decoy, make([]byte, 2*1024*1024*1024), 0o644); err != nil {
+	if err := os.WriteFile(decoy, []byte("decoy"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
+	reachedHash := make(chan struct{}) // closed once the scan reaches the hash
+	release := make(chan struct{})     // closed by this test to let it finish
+	var once sync.Once
+	t.Cleanup(scanner.SetHashFileForTest(func(path string) (string, error) {
+		once.Do(func() { close(reachedHash) })
+		<-release
+		return hashing.SHA256File(path)
+	}))
 
 	// Already pending from an earlier run -- no file on disk needed for
 	// this row itself, same established pattern as
@@ -213,45 +218,50 @@ func TestRunFolderCycle_UploadStartsWithoutWaitingForScanToFinish(t *testing.T) 
 	conc := quota.NewAdaptiveConcurrency(1)
 	breaker := uploader.NewCircuitBreakerState()
 
-	start := time.Now()
-	_, err := RunFolderCycle(context.Background(), db, config.Defaults(), dir, conc, breaker, nil, nil, nil, nil, nil, nil, nil)
-	elapsed := time.Since(start)
+	done := make(chan error, 1)
+	go func() {
+		_, err := RunFolderCycle(context.Background(), db, config.Defaults(), dir, conc, breaker, nil, nil, nil, nil, nil, nil, nil)
+		done <- err
+	}()
 
-	// RunFolderCycle deliberately does NOT wait for its background scan
-	// goroutine on an early return (see its own doc comment) -- which is
-	// exactly what this test is proving. But that goroutine is still
-	// running against this test's db/decoy file after the assertions
-	// below, so wait for it to actually finish (evidenced by the decoy
-	// showing up as pending too) before this test function returns and
-	// t.Cleanup tears down the temp dir and closes db out from under it.
-	//
-	// Two minutes, not five seconds. What is being waited on is a 2 GB
-	// hash, which is disk-bound and has no upper bound on a loaded
-	// machine: on a Windows runner where this package took 982s against a
-	// normal 404s, five seconds expired while the scan was still reading,
-	// the temp dir was deleted with the file still open, and Windows
-	// refused -- failing a test that had itself passed. The wait costs
-	// nothing when the scan is quick, which is every other time.
-	t.Cleanup(func() {
-		deadline := time.Now().Add(2 * time.Minute)
-		for time.Now().Before(deadline) {
-			pending, perr := db.ListPendingUnder([]string{dir})
-			if perr == nil && len(pending) >= 2 {
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		// Say so rather than letting it surface as an unrelated-looking
-		// "file in use by another process" from TempDir's own cleanup.
-		t.Error("the background scan had not finished after 2m; the temp dir is about to be deleted with files still open")
-	})
+	// The scan must really have reached hashing, or this would pass
+	// trivially for the wrong reason.
+	select {
+	case <-reachedHash:
+	case <-time.After(30 * time.Second):
+		close(release)
+		t.Fatal("the scan never reached the hash function")
+	}
 
+	// With the scan wedged mid-hash, RunFolderCycle must still return: the
+	// upload phase does not wait for it. uploader.New fails fast here (a
+	// plain missing-credentials-file error, no network round-trip -- see
+	// TestRunFolderCycle_PendingWork_StillAttemptsUpload).
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(30 * time.Second):
+		close(release)
+		t.Fatal("RunFolderCycle did not return while the scan was still hashing -- the upload phase is waiting for the scan to finish")
+	}
 	if err == nil {
 		t.Fatal("RunFolderCycle = nil error, want the upload phase to have actually been attempted (and fail, with no OAuth client configured in this test)")
 	}
-	if elapsed > 500*time.Millisecond {
-		t.Errorf("RunFolderCycle took %v, want well under the decoy file's own hash time -- the upload phase must not wait for the scan to finish", elapsed)
+
+	// Let the background scan finish before t.Cleanup tears down the temp
+	// dir and closes db out from under it. RunFolderCycle deliberately does
+	// not wait for its scan goroutine on an early return -- which is what
+	// this test proves -- so the wait belongs here.
+	close(release)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		pending, perr := db.ListPendingUnder([]string{dir})
+		if perr == nil && len(pending) >= 2 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
+	t.Error("the background scan had not finished; the temp dir is about to be deleted with files still open")
 }
 
 // TestRunFolderCycle_AllPendingExcludedByMediaTypeFilter_StopsInsteadOfSpinning
