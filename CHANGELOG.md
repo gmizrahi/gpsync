@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0]
+
+The dashboard now answers *when* and *which*: Browse shows when each file
+reached its state, and every Statistics chart opens the exact files it counts.
+Also a security fix -- another website could embed the dashboard -- and a
+cleanup of every button in it.
+
+Opening the ledger the first time adds one column and two triggers to it, in
+milliseconds. An older gpsync can still open a ledger this version has used.
+
 ### Added
 
 - **Browse shows when, and sorts by it.** A new column, headed by what it
@@ -15,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   show the time they were marked, tagged *marked synced*, so they never read
   as uploads. Rows from before this release show "—" on every tab except
   Uploaded, which has always recorded its time. `gpsync whatis` prints the
-  same moment as *Status since*. (#52)
+  same moment as *Status since*. (#52, #55)
 - **Click a Statistics chart to see the files behind it.** Every bar of
   *Uploaded over time* and *By capture year*, both segments of each
   *By media type* bar, and every row of the extension tables now open Browse
@@ -25,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   filter while you switch tabs, sort, page, search or act on a row. Browse
   gains an **All** tab, with a Status column, for charts that count files of
   every status. On a phone, a tap still shows a bar's figures first, now
-  with a *View files* link. (#53)
+  with a *View files* link. (#53, #56)
 
 ### Fixed
 
@@ -35,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now (clickjacking). The cross-site check didn't stop it, since a click
   inside the frame is a click on the dashboard's own page, and with login off
   -- the default -- there was no cookie to withhold. Every response now
-  forbids framing. (#57)
+  forbids framing. (#57, #58)
 - **Dashboard buttons are consistent, and Browse is readable again.** Each
   Browse row's Re-check and Forget were two full-size buttons stacked on top
   of each other, doubling every row's height: the cell's layout class had
@@ -44,7 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   different points -- are one dropdown shared by both actions. Duplicates and
   Originals no longer mix two button sizes in one row, the Sign in file
   picker matches the theme, and four links that wrapped a button (invalid
-  HTML, two tab stops each) are plain links. (#51)
+  HTML, two tab stops each) are plain links. (#51, #54)
+
+### Changed
+
+- **modernc.org/sqlite 1.60.1**, the ledger's storage engine, with its
+  matching libc. Checked against a copy of a real 79k-row ledger before
+  merging: integrity check clean, every row readable. (#49)
 
 ## [0.3.3]
 
@@ -297,7 +313,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/gmizrahi/gpsync/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/gmizrahi/gpsync/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/gmizrahi/gpsync/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/gmizrahi/gpsync/compare/v0.3.0...v0.3.1
