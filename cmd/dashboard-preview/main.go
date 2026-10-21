@@ -167,7 +167,7 @@ func main() {
 			`<script>document.getElementById('v').textContent=innerWidth+'x'+innerHeight+' dpr '+devicePixelRatio`+
 			`+' '+(matchMedia('(max-width: 600px)').matches?'phone-mq':'wide-mq')</script></body></html>`)
 	})
-	mux.Handle("/", dashboard.Handler(db, ctrl, dashboard.Options{AppName: "GPhotos Sync"}))
+	mux.Handle("/", allowSameOriginFraming(dashboard.Handler(db, ctrl, dashboard.Options{AppName: "GPhotos Sync"})))
 
 	fmt.Printf("dashboard preview on http://%s (ledger: %s)\n", *addr, statedb.StateDBPath)
 	srv := &http.Server{
@@ -179,3 +179,55 @@ func main() {
 	}
 	log.Fatal(srv.ListenAndServe())
 }
+
+// allowSameOriginFraming relaxes the dashboard's anti-framing headers from
+// "nobody" to "this origin only", so /__frame above can still host a page at
+// an exact phone size. The real dashboard forbids all framing (issue #57,
+// frameDenyMiddleware); that is right for it and wrong for this tool, whose
+// whole job here is to frame it.
+//
+// Done by rewriting the headers on the way out rather than by an option on
+// dashboard.Handler, so the production code has no knob that turns the
+// protection down. Other origins still cannot frame the preview.
+func allowSameOriginFraming(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ServeHTTP(&sameOriginFrameWriter{ResponseWriter: w}, r)
+	})
+}
+
+type sameOriginFrameWriter struct {
+	http.ResponseWriter
+	done bool
+}
+
+func (s *sameOriginFrameWriter) relax() {
+	if s.done {
+		return
+	}
+	s.done = true
+	s.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
+	s.Header().Set("X-Frame-Options", "SAMEORIGIN")
+}
+
+func (s *sameOriginFrameWriter) WriteHeader(code int) {
+	s.relax()
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *sameOriginFrameWriter) Write(b []byte) (int, error) {
+	s.relax()
+	return s.ResponseWriter.Write(b)
+}
+
+// Flush passes through: /api/quit and a backup restore flush their answer
+// before shutting down, and a wrapper that hid http.Flusher would quietly
+// turn that into a no-op.
+func (s *sameOriginFrameWriter) Flush() {
+	s.relax()
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the real writer.
+func (s *sameOriginFrameWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
