@@ -75,8 +75,10 @@ var duplicatesTmpl = template.Must(template.New("duplicates").Parse(`
     </label>
     {{end}}
   </div>
-  <button type="submit">Keep &amp; Next</button>
-  <a href="/duplicates?i={{.NextIndex}}"><button type="button" class="btn-sm">Skip</button></a>
+  <div class="btn-row">
+    <button type="submit">Keep &amp; Next</button>
+    <a class="btn-secondary" href="/duplicates?i={{.NextIndex}}">Skip</a>
+  </div>
 </form>
 {{end}}
 `))

@@ -54,7 +54,7 @@ var backupTmpl = template.Must(template.New("backup").Parse(`
   <h2>Existing backups</h2>
   {{if not .Backups}}<div class="hint">No backups yet.</div>{{end}}
   {{range .Backups}}
-  <div class="row"><span class="label">{{.When}}</span><span>{{.SizeStr}} &nbsp; <a href="/backup/restore?file={{.Name}}"><button type="button" class="btn-sm">Restore</button></a></span></div>
+  <div class="row"><span class="label">{{.When}}</span><span>{{.SizeStr}} &nbsp; <a class="btn-sm" href="/backup/restore?file={{.Name}}">Restore</a></span></div>
   {{end}}
 </div>
 {{end}}
