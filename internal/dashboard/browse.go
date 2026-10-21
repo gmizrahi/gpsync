@@ -1,8 +1,9 @@
 package dashboard
 
 import (
+	"fmt"
 	"html/template"
-	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,23 @@ type browseRowData struct {
 	MarkedSynced bool
 	Attempts     int
 	Error        string
+	// Status is shown only on the All tab, where rows are of every status.
+	Status string
+}
+
+// browseTab is one tab link. Built in Go, not in the template: a tab keeps
+// the current search and drill-down filter, and html/template would
+// percent-encode the "&" and "=" of a pre-built query fragment.
+type browseTab struct {
+	Label  string
+	Href   string
+	Active bool
+}
+
+// hiddenField carries the active drill-down filter through a form, so a
+// search or a row action keeps the list it came from.
+type hiddenField struct {
+	Name, Value string
 }
 
 // sortColumn is one clickable, sort-aware table header. Href always points
@@ -46,17 +64,25 @@ type sortColumn struct {
 }
 
 type browsePageData struct {
-	Kind        string
-	Query       string
-	ShowError   bool
-	WhenLabel   string
-	Columns     []sortColumn
-	Rows        []browseRowData
-	Total       int
-	ShowingFrom int
-	ShowingTo   int
-	PrevLink    string
-	NextLink    string
+	Kind       string
+	Query      string
+	Tabs       []browseTab
+	ShowError  bool
+	ShowStatus bool
+	WhenLabel  string
+	// FilterChips describe an active drill-down filter in words, and
+	// FilterClear is the same list without it. FilterFields carries the
+	// filter through the page's forms.
+	FilterChips  []string
+	FilterClear  string
+	FilterFields []hiddenField
+	Columns      []sortColumn
+	Rows         []browseRowData
+	Total        int
+	ShowingFrom  int
+	ShowingTo    int
+	PrevLink     string
+	NextLink     string
 
 	// SourceFolders backs the "sync one folder now" control. Only
 	// configured folders are offered, and the handler re-checks the
@@ -71,13 +97,9 @@ type browsePageData struct {
 // characters a browser would otherwise interpret as markup.
 var browseTmpl = template.Must(template.New("browse").Parse(`
 <div class="browse-tabs">
-  <a href="/browse?type=pending&q={{.Query}}" {{if eq .Kind "pending"}}class="active"{{end}}>Pending</a>
-  <a href="/browse?type=failed_retryable&q={{.Query}}" {{if eq .Kind "failed_retryable"}}class="active"{{end}}>Retryable</a>
-  <a href="/browse?type=failed_permanent&q={{.Query}}" {{if eq .Kind "failed_permanent"}}class="active"{{end}}>Failed</a>
-  <a href="/browse?type=uploaded&q={{.Query}}" {{if eq .Kind "uploaded"}}class="active"{{end}}>Uploaded</a>
-  <a href="/browse?type=needs_review&q={{.Query}}" {{if eq .Kind "needs_review"}}class="active"{{end}}>Needs review</a>
-  <a href="/browse?type=ignored&q={{.Query}}" {{if eq .Kind "ignored"}}class="active"{{end}}>Ignored</a>
+  {{range .Tabs}}<a href="{{.Href}}"{{if .Active}} class="active"{{end}}>{{.Label}}</a>{{end}}
 </div>
+{{if .FilterChips}}<div class="banner banner-info">Showing only {{range .FilterChips}}<span class="badge badge-dim">{{.}}</span> {{end}}&middot; {{.Total}} file(s) &middot; <a href="{{.FilterClear}}">Clear filter</a></div>{{end}}
 {{if .Message}}<div class="banner banner-ok">{{.Message}}</div>{{end}}
 {{if .ErrorMessage}}<div class="banner banner-err">{{.ErrorMessage}}</div>{{end}}
 <div class="browse-toolbar">
@@ -88,6 +110,7 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
      reads "folder", so the extra "tab" it now carries is ignored. */}}
 <form method="post" action="/sync-folder">
   <input type="hidden" name="tab" value="{{.Kind}}">
+  {{range .FilterFields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
   <select name="folder" aria-label="Source folder">
     {{range .SourceFolders}}<option value="{{.}}">{{.}}</option>{{end}}
   </select>
@@ -97,6 +120,7 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
 {{end}}
 <form method="get" action="/browse">
   <input type="hidden" name="type" value="{{.Kind}}">
+  {{range .FilterFields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
   <input type="text" class="tb-field-wide" name="q" value="{{.Query}}" placeholder="Filter by path or hash..." aria-label="Filter by path or hash">
   <button type="submit" class="btn-secondary tb-search">Search</button>
 </form>
@@ -106,12 +130,13 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
   <table class="browse">
     <thead><tr>
       {{range .Columns}}<th{{if .Center}} class="center"{{end}}><a href="{{.Href}}"{{if .Active}} class="active"{{end}}>{{.Label}}{{.Indicator}}</a></th>{{end}}
+      {{if .ShowStatus}}<th>Status</th>{{end}}
       {{if .ShowError}}<th>Error</th>{{end}}
       <th class="center">Actions</th>
     </tr></thead>
     <tbody>
-      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="b-when" data-label="{{$.WhenLabel}}">{{.When}}{{if .MarkedSynced}} <span class="badge badge-dim" title="Recorded with Mark as already synced: gpsync never uploaded this file, and the time is when it was marked">marked synced</span>{{end}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center b-actions"><div class="row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" class="btn-sm" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" class="btn-sm" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></div></td></tr>{{end}}
-      {{if not .Rows}}<tr><td colspan="9">No matching files.</td></tr>{{end}}
+      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="b-when" data-label="{{$.WhenLabel}}">{{.When}}{{if .MarkedSynced}} <span class="badge badge-dim" title="Recorded with Mark as already synced: gpsync never uploaded this file, and the time is when it was marked">marked synced</span>{{end}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowStatus}}<td data-label="Status">{{.Status}}</td>{{end}}{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center b-actions"><div class="row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}">{{range $.FilterFields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<button type="submit" class="btn-sm" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}">{{range $.FilterFields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<button type="submit" class="btn-sm" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></div></td></tr>{{end}}
+      {{if not .Rows}}<tr><td colspan="10">No matching files.</td></tr>{{end}}
     </tbody>
   </table>
   </div>
@@ -126,6 +151,31 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
 </div>
 `))
 
+// browseTabOrder is the tab bar, left to right. A status's display name is
+// its tab's label (see browseStatusLabel), so the two cannot drift apart.
+var browseTabOrder = []struct {
+	Kind  engine.FileListKind
+	Label string
+}{
+	{engine.FileListPending, "Pending"},
+	{engine.FileListFailedRetryable, "Retryable"},
+	{engine.FileListFailedPermanent, "Failed"},
+	{engine.FileListUploaded, "Uploaded"},
+	{engine.FileListNeedsReview, "Needs review"},
+	{engine.FileListIgnored, "Ignored"},
+	{engine.FileListAll, "All"},
+}
+
+// browseStatusLabel names a ledger status the way its tab does.
+func browseStatusLabel(status string) string {
+	for _, tab := range browseTabOrder {
+		if string(tab.Kind) == status {
+			return tab.Label
+		}
+	}
+	return status
+}
+
 var browsePageTitles = map[engine.FileListKind]string{
 	engine.FileListPending:         "Pending",
 	engine.FileListFailedRetryable: "Retryable failures",
@@ -133,6 +183,7 @@ var browsePageTitles = map[engine.FileListKind]string{
 	engine.FileListUploaded:        "Uploaded",
 	engine.FileListNeedsReview:     "Needs review",
 	engine.FileListIgnored:         "Ignored",
+	engine.FileListAll:             "All files",
 }
 
 // browseShowErrorKinds is the subset of kinds that actually carry a
@@ -174,10 +225,13 @@ var browseWhenLabels = map[engine.FileListKind]string{
 	engine.FileListUploaded:        "Uploaded",
 	engine.FileListNeedsReview:     "Flagged",
 	engine.FileListIgnored:         "Ignored",
+	// Rows of every status: RowTime is each one's own -- an upload for an
+	// uploaded row, entering its status for the rest.
+	engine.FileListAll: "Last change",
 }
 
-func browseLink(kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, offset int) string {
-	v := url.Values{}
+func browseLink(kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, offset int, filter engine.BrowseFilter) string {
+	v := filter.Values()
 	v.Set("type", string(kind))
 	if query != "" {
 		v.Set("q", query)
@@ -200,7 +254,7 @@ func browseLink(kind engine.FileListKind, query string, sortKey engine.SortKey, 
 // CURRENT direction. Changing sort/column always resets back to page 1
 // (offset omitted from the link), since a new order makes any prior
 // offset meaningless.
-func buildSortColumns(kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool) []sortColumn {
+func buildSortColumns(kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, filter engine.BrowseFilter) []sortColumn {
 	cols := make([]sortColumn, len(browseColumns))
 	for i, c := range browseColumns {
 		active := sortKey == c.Key || (sortKey == "" && c.Key == engine.SortKeyPath)
@@ -219,7 +273,7 @@ func buildSortColumns(kind engine.FileListKind, query string, sortKey engine.Sor
 		}
 		cols[i] = sortColumn{
 			Label:     label,
-			Href:      browseLink(kind, query, c.Key, nextDesc, 0),
+			Href:      browseLink(kind, query, c.Key, nextDesc, 0, filter),
 			Active:    active,
 			Indicator: indicator,
 			Center:    c.Center,
@@ -228,9 +282,9 @@ func buildSortColumns(kind engine.FileListKind, query string, sortKey engine.Sor
 	return cols
 }
 
-func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, offset int, theme string, authEnabled bool, sourceFolders []string, msg, errMsg string) (string, error) {
+func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, offset int, filter engine.BrowseFilter, theme string, authEnabled bool, sourceFolders []string, msg, errMsg string) (string, error) {
 	res, err := engine.BrowseFiles(db, engine.BrowseQuery{
-		Kind: kind, Search: query, Sort: sortKey, SortDesc: sortDesc, Offset: offset, Limit: browseLimit,
+		Kind: kind, Search: query, Sort: sortKey, SortDesc: sortDesc, Offset: offset, Limit: browseLimit, Filter: filter,
 	})
 	if err != nil {
 		return "", err
@@ -263,17 +317,19 @@ func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, so
 			MarkedSynced: u.MarkedSynced(),
 			Attempts:     u.AttemptCount,
 			Error:        errMsg,
+			Status:       browseStatusLabel(u.Status),
 		}
 	}
 
 	data := browsePageData{
-		Kind:      string(kind),
-		Query:     query,
-		ShowError: browseShowErrorKinds[kind],
-		WhenLabel: browseWhenLabels[kind],
-		Columns:   buildSortColumns(kind, query, sortKey, sortDesc),
-		Rows:      rows,
-		Total:     res.Total,
+		Kind:       string(kind),
+		Query:      query,
+		ShowError:  browseShowErrorKinds[kind],
+		ShowStatus: kind == engine.FileListAll,
+		WhenLabel:  browseWhenLabels[kind],
+		Columns:    buildSortColumns(kind, query, sortKey, sortDesc, filter),
+		Rows:       rows,
+		Total:      res.Total,
 
 		SourceFolders: sourceFolders,
 		Message:       msg,
@@ -288,10 +344,28 @@ func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, so
 		if prevOffset < 0 {
 			prevOffset = 0
 		}
-		data.PrevLink = browseLink(kind, query, sortKey, sortDesc, prevOffset)
+		data.PrevLink = browseLink(kind, query, sortKey, sortDesc, prevOffset, filter)
 	}
 	if res.Offset+len(res.Rows) < res.Total {
-		data.NextLink = browseLink(kind, query, sortKey, sortDesc, res.Offset+browseLimit)
+		data.NextLink = browseLink(kind, query, sortKey, sortDesc, res.Offset+browseLimit, filter)
+	}
+
+	// A tab keeps the search and the filter, and starts from page one in
+	// its own default order.
+	for _, tab := range browseTabOrder {
+		data.Tabs = append(data.Tabs, browseTab{Label: tab.Label, Href: browseLink(tab.Kind, query, "", false, 0, filter), Active: tab.Kind == kind})
+	}
+	if filter.Active() {
+		chips, err := browseFilterChips(db, filter)
+		if err != nil {
+			return "", err
+		}
+		data.FilterChips = chips
+		data.FilterClear = browseLink(kind, query, sortKey, sortDesc, 0, engine.BrowseFilter{})
+		for name, vals := range filter.Values() {
+			data.FilterFields = append(data.FilterFields, hiddenField{Name: name, Value: vals[0]})
+		}
+		sort.Slice(data.FilterFields, func(i, j int) bool { return data.FilterFields[i].Name < data.FilterFields[j].Name })
 	}
 
 	var buf strings.Builder
@@ -303,4 +377,57 @@ func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, so
 		title = "Browse"
 	}
 	return pageShell(db, title, "browse", buf.String(), theme, authEnabled), nil
+}
+
+// browseFilterChips says in words what a drill-down filter keeps, one
+// phrase per condition -- what the bar that opened this list was counting.
+func browseFilterChips(db *statedb.DB, f engine.BrowseFilter) ([]string, error) {
+	var chips []string
+	switch f.Kind {
+	case "photo":
+		chips = append(chips, "Photos")
+	case "video":
+		chips = append(chips, "Videos")
+	case "other":
+		chips = append(chips, "Other files")
+	}
+	switch f.Ext {
+	case "":
+	case "(none)":
+		chips = append(chips, "No extension")
+	default:
+		chips = append(chips, "."+f.Ext+" files")
+	}
+	switch f.Year {
+	case "":
+	case "unknown":
+		chips = append(chips, "No known capture year")
+	case "older":
+		before, ok, err := engine.OlderThan(db)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			chips = append(chips, fmt.Sprintf("Captured before %d", before))
+		} else {
+			chips = append(chips, "Captured in an older year")
+		}
+	default:
+		chips = append(chips, "Captured in "+f.Year)
+	}
+	if f.Outstanding {
+		chips = append(chips, "Still to upload")
+	}
+	if !f.UploadedOn.IsZero() {
+		from, _ := engine.ActivityRange(f.UploadedOn, f.Span)
+		switch f.Span {
+		case engine.ActivityWeekly:
+			chips = append(chips, "Uploaded in the week of "+from.Format("Mon 2 Jan 2006"))
+		case engine.ActivityMonthly:
+			chips = append(chips, "Uploaded in "+from.Format("January 2006"))
+		default:
+			chips = append(chips, "Uploaded on "+from.Format("Mon 2 Jan 2006"))
+		}
+	}
+	return chips, nil
 }

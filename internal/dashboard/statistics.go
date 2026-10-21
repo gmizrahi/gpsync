@@ -63,17 +63,27 @@ type statKindRow struct {
 	PendingPct   string
 	PendingFlex  template.CSS
 	PendingBar   template.CSS
+
+	// Links to the files behind the row, its uploaded segment and its
+	// pending segment.
+	AllHref, DoneHref, PendingHref string
 }
 
 type statTableRow struct {
 	Label    string
 	ValueStr string
 	BarStyle template.CSS
+	// Href opens Browse on the files this row counts (see statDrillHref),
+	// and Title says how many that is -- the size table shows bytes.
+	Href  string
+	Title string
 }
 
 type statYearBar struct {
 	Label    string
 	CountStr string
+	// Href opens Browse on the files this bar counts; "" for an empty bar.
+	Href string
 	// FillStyle sizes the bar itself (height:X%); ValueStyle positions
 	// the count label ABOVE it (bottom:calc(X% + gap)) -- computed from
 	// the SAME percentage but kept as two separate style strings since
@@ -96,6 +106,7 @@ type statActivityBar struct {
 	Label      string
 	ValueStr   string
 	Title      string
+	Href       string // "" for an empty bar
 	FillStyle  template.CSS
 	ValueStyle template.CSS
 }
@@ -197,6 +208,31 @@ type statThrottleRow struct {
 // label like "101.6GB" would just overflow at the default 0.68rem.
 const activityDenseBarLimit = 14
 
+// statDrillHref links a chart element to the Browse list of exactly the
+// files it counted (issue #53). Built with Browse's own browseLink, so the
+// two pages cannot disagree about URL shape. An empty element gets no link:
+// there would be nothing to list.
+func statDrillHref(count int, kind engine.FileListKind, f engine.BrowseFilter, sortKey engine.SortKey, desc bool) string {
+	if count == 0 {
+		return ""
+	}
+	return browseLink(kind, "", sortKey, desc, 0, f)
+}
+
+// statKindFilter maps a ByKind label to its BrowseFilter value.
+var statKindFilter = map[string]string{"Photos": "photo", "Videos": "video", "Other": "other"}
+
+// statYearFilter maps a ByYear label to its BrowseFilter value.
+func statYearFilter(label string) string {
+	switch label {
+	case "Older":
+		return "older"
+	case "Unknown":
+		return "unknown"
+	}
+	return label
+}
+
 // activityBar scales one bar against the chart's own maximum. A bucket
 // with real content never renders as literally nothing (the 2% floor),
 // so a quiet-but-not-empty day stays visible next to a busy one; a
@@ -293,6 +329,9 @@ func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activi
 			PendingPct:    pendingPct,
 			PendingFlex:   flex(k.PendingBytes),
 			PendingBar:    bar(k.PendingBytes, true),
+			AllHref:       statDrillHref(k.Count, engine.FileListAll, engine.BrowseFilter{Kind: statKindFilter[k.Label]}, "", false),
+			DoneHref:      statDrillHref(k.UploadedCount, engine.FileListUploaded, engine.BrowseFilter{Kind: statKindFilter[k.Label]}, "", false),
+			PendingHref:   statDrillHref(k.PendingCount, engine.FileListAll, engine.BrowseFilter{Kind: statKindFilter[k.Label], Outstanding: true}, "", false),
 		})
 	}
 
@@ -311,6 +350,8 @@ func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activi
 			Label:    e.Label,
 			ValueStr: humanCount(e.Count),
 			BarStyle: template.CSS(fmt.Sprintf("width:%.2f%%", pct)),
+			Href:     statDrillHref(e.Count, engine.FileListAll, engine.BrowseFilter{Ext: e.Label}, "", false),
+			Title:    fmt.Sprintf("%s file(s)", humanCount(e.Count)),
 		})
 	}
 
@@ -329,6 +370,8 @@ func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activi
 			Label:    e.Label,
 			ValueStr: humanBytes(e.Bytes),
 			BarStyle: template.CSS(fmt.Sprintf("width:%.2f%%", pct)),
+			Href:     statDrillHref(e.Count, engine.FileListAll, engine.BrowseFilter{Ext: e.Label}, engine.SortKeySize, true),
+			Title:    fmt.Sprintf("%s file(s)", humanCount(e.Count)),
 		})
 	}
 
@@ -358,6 +401,7 @@ func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activi
 		data.ByYear = append(data.ByYear, statYearBar{
 			Label:      y.Label,
 			CountStr:   humanCount(y.Count),
+			Href:       statDrillHref(y.Count, engine.FileListAll, engine.BrowseFilter{Year: statYearFilter(y.Label)}, engine.SortKeyCaptured, false),
 			FillStyle:  template.CSS(fmt.Sprintf("height:%.2f%%", pct)),
 			ValueStyle: template.CSS(fmt.Sprintf("bottom:calc(%.2f%% + 0.2rem)", pct)),
 		})
@@ -410,8 +454,13 @@ func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activi
 	}
 	for _, b := range activityBuckets {
 		title := fmt.Sprintf("%s — %s file(s), %s", b.Label, humanCount(b.Files), humanBytes(b.Bytes))
-		data.ActivityFiles = append(data.ActivityFiles, activityBar(b.Label, humanCount(b.Files), title, float64(b.Files), float64(maxFiles)))
-		data.ActivityBytes = append(data.ActivityBytes, activityBar(b.Label, humanBytes(b.Bytes), title, float64(b.Bytes), float64(maxBytes)))
+		href := statDrillHref(b.Files, engine.FileListUploaded, engine.BrowseFilter{UploadedOn: b.Start, Span: activity}, engine.SortKeyWhen, true)
+		fb := activityBar(b.Label, humanCount(b.Files), title, float64(b.Files), float64(maxFiles))
+		fb.Href = href
+		bb := activityBar(b.Label, humanBytes(b.Bytes), title, float64(b.Bytes), float64(maxBytes))
+		bb.Href = href
+		data.ActivityFiles = append(data.ActivityFiles, fb)
+		data.ActivityBytes = append(data.ActivityBytes, bb)
 	}
 
 	if throttleEvents, err := engine.BuildThrottleAnalysis(db); err == nil {
@@ -451,16 +500,16 @@ var statisticsTmpl = template.Must(template.New("statistics").Parse(`
     {{range .ByKind}}<span></span>
     <div class="mt-labels">{{if .HasDone}}<span class="mt-done" style="{{.DoneFlex}}">{{.DoneLabel}}</span>{{end}}{{if .HasPending}}<span class="mt-pending" style="{{.PendingFlex}}">{{.PendingLabel}}</span>{{end}}</div>
     <span class="mt-tot">{{.TotalFilesStr}}</span>
-    <span class="mt-name">{{.Label}}</span>
-    <div class="mt-bar">{{if .HasDone}}<span class="mt-seg mt-done" style="{{.DoneBar}}">{{.DonePct}}</span>{{end}}{{if .HasPending}}<span class="mt-seg mt-pending" style="{{.PendingBar}}">{{.PendingPct}}</span>{{end}}</div>
+    <span class="mt-name"><a href="{{.AllHref}}" title="All: {{.TotalFilesStr}}">{{.Label}}</a></span>
+    <div class="mt-bar">{{if .HasDone}}<a class="mt-seg mt-done" href="{{.DoneHref}}" title="Uploaded: {{.DoneLabel}}" style="{{.DoneBar}}">{{.DonePct}}</a>{{end}}{{if .HasPending}}<a class="mt-seg mt-pending" href="{{.PendingHref}}" title="Pending: {{.PendingLabel}}" style="{{.PendingBar}}">{{.PendingPct}}</a>{{end}}</div>
     <span class="mt-tot mt-tot-b">{{.TotalBytesStr}}</span>
     {{end}}
   </div>
   <div class="mt-phone">
     {{range .ByKind}}<div class="mtp-row">
-      <div class="mtp-head"><span class="mtp-name">{{.Label}}</span><span class="mtp-tot">{{.TotalFilesStr}} &middot; <b>{{.TotalBytesStr}}</b></span></div>
-      <div class="mt-bar">{{if .HasDone}}<span class="mt-seg mt-done" style="{{.DoneBar}}">{{.DonePct}}</span>{{end}}{{if .HasPending}}<span class="mt-seg mt-pending" style="{{.PendingBar}}">{{.PendingPct}}</span>{{end}}</div>
-      <div class="mtp-legend">{{if .HasDone}}<span>Uploaded: {{.DoneLabel}}</span>{{end}}{{if .HasPending}}<span>Pending: {{.PendingLabel}}</span>{{end}}</div>
+      <div class="mtp-head"><span class="mtp-name"><a href="{{.AllHref}}">{{.Label}}</a></span><span class="mtp-tot">{{.TotalFilesStr}} &middot; <b>{{.TotalBytesStr}}</b></span></div>
+      <div class="mt-bar">{{if .HasDone}}<a class="mt-seg mt-done" href="{{.DoneHref}}" style="{{.DoneBar}}">{{.DonePct}}</a>{{end}}{{if .HasPending}}<a class="mt-seg mt-pending" href="{{.PendingHref}}" style="{{.PendingBar}}">{{.PendingPct}}</a>{{end}}</div>
+      <div class="mtp-legend">{{if .HasDone}}<a href="{{.DoneHref}}">Uploaded: {{.DoneLabel}}</a>{{end}}{{if .HasPending}}<a href="{{.PendingHref}}">Pending: {{.PendingLabel}}</a>{{end}}</div>
     </div>{{end}}
   </div>
 </div>
@@ -495,25 +544,25 @@ var statisticsTmpl = template.Must(template.New("statistics").Parse(`
   </div>
   <div class="chart-caption">Files</div>
   <div class="year-chart{{if .ActivityDense}} year-chart-dense{{end}}">
-    {{range .ActivityFiles}}<div class="year-bar" title="{{.Title}}"><div class="year-bar-track"><div class="year-bar-value" style="{{.ValueStyle}}">{{.ValueStr}}</div><div class="year-bar-fill" style="{{.FillStyle}}"></div></div><div class="year-bar-label">{{.Label}}</div></div>{{end}}
+    {{range .ActivityFiles}}<a class="year-bar"{{if .Href}} href="{{.Href}}"{{end}} title="{{.Title}}"><div class="year-bar-track"><div class="year-bar-value" style="{{.ValueStyle}}">{{.ValueStr}}</div><div class="year-bar-fill" style="{{.FillStyle}}"></div></div><div class="year-bar-label">{{.Label}}</div></a>{{end}}
   </div>
   <div class="chart-tap" aria-live="polite"></div>
   <div class="chart-caption">Size</div>
   <div class="year-chart{{if .ActivityDense}} year-chart-dense{{end}}">
-    {{range .ActivityBytes}}<div class="year-bar" title="{{.Title}}"><div class="year-bar-track"><div class="year-bar-value" style="{{.ValueStyle}}">{{.ValueStr}}</div><div class="year-bar-fill year-bar-fill-alt" style="{{.FillStyle}}"></div></div><div class="year-bar-label">{{.Label}}</div></div>{{end}}
+    {{range .ActivityBytes}}<a class="year-bar"{{if .Href}} href="{{.Href}}"{{end}} title="{{.Title}}"><div class="year-bar-track"><div class="year-bar-value" style="{{.ValueStyle}}">{{.ValueStr}}</div><div class="year-bar-fill year-bar-fill-alt" style="{{.FillStyle}}"></div></div><div class="year-bar-label">{{.Label}}</div></a>{{end}}
   </div>
   <div class="chart-tap" aria-live="polite"></div>
-  <div class="hint">{{.ActivityNote}} Counts only files gpsync actually uploaded &mdash; files recorded by <code>mark-synced</code> never moved any bytes, so they're excluded. Days are local time, unlike the quota-linked "Uploaded today" card on Status, which follows Google's midnight-Pacific reset. Hover or tap a bar for exact figures.</div>
+  <div class="hint">{{.ActivityNote}} Counts only files gpsync actually uploaded &mdash; files recorded by <code>mark-synced</code> never moved any bytes, so they're excluded. Days are local time, unlike the quota-linked "Uploaded today" card on Status, which follows Google's midnight-Pacific reset. Hover or tap a bar for exact figures; click one to list its files.</div>
 </div>
 
 <div class="card">
   <h2>By capture year</h2>
   {{if .ByYear}}
   <div class="year-chart">
-    {{range .ByYear}}<div class="year-bar" title="{{.Label}}: {{.CountStr}} file(s)"><div class="year-bar-track"><div class="year-bar-value" style="{{.ValueStyle}}">{{.CountStr}}</div><div class="year-bar-fill" style="{{.FillStyle}}"></div></div><div class="year-bar-label">{{.Label}}</div></div>{{end}}
+    {{range .ByYear}}<a class="year-bar"{{if .Href}} href="{{.Href}}"{{end}} title="{{.Label}}: {{.CountStr}} file(s)"><div class="year-bar-track"><div class="year-bar-value" style="{{.ValueStyle}}">{{.CountStr}}</div><div class="year-bar-fill" style="{{.FillStyle}}"></div></div><div class="year-bar-label">{{.Label}}</div></a>{{end}}
   </div>
   <div class="chart-tap" aria-live="polite"></div>
-  <div class="hint">{{if .YearChartHasOlder}}"Older" folds every year before this window together. {{end}}Years come from a folder/filename date when the path has one (more reliable than file metadata), otherwise the capture date on file; "Unknown" is whatever's left with neither.</div>
+  <div class="hint">{{if .YearChartHasOlder}}"Older" folds every year before this window together. {{end}}Years come from a folder/filename date when the path has one (more reliable than file metadata), otherwise the capture date on file; "Unknown" is whatever's left with neither. Click a bar to list its files.</div>
   {{else}}<div class="hint">Nothing tracked yet.</div>{{end}}
   {{if .Message}}<div class="banner banner-ok">{{.Message}}</div>{{end}}
   {{if .ErrorMessage}}<div class="banner banner-err">{{.ErrorMessage}}</div>{{end}}
@@ -529,13 +578,13 @@ var statisticsTmpl = template.Must(template.New("statistics").Parse(`
   <div class="card">
     <h2>By extension &mdash; count</h2>
     <div class="table-wrap"><table class="stats"><thead><tr><th>Extension</th><th class="num">Share</th><th class="num">Files</th></tr></thead><tbody>
-      {{range .ByExtCount}}<tr><td class="name">{{.Label}}</td><td class="num"><span class="mini-bar-track"><span class="mini-bar-fill" style="{{.BarStyle}}"></span></span></td><td class="num">{{.ValueStr}}</td></tr>{{end}}
+      {{range .ByExtCount}}<tr><td class="name"><a href="{{.Href}}" title="{{.Title}}">{{.Label}}</a></td><td class="num"><span class="mini-bar-track"><span class="mini-bar-fill" style="{{.BarStyle}}"></span></span></td><td class="num">{{.ValueStr}}</td></tr>{{end}}
     </tbody></table></div>
   </div>
   <div class="card">
     <h2>By extension &mdash; total size</h2>
     <div class="table-wrap"><table class="stats"><thead><tr><th>Extension</th><th class="num">Share</th><th class="num">Size</th></tr></thead><tbody>
-      {{range .ByExtSize}}<tr><td class="name">{{.Label}}</td><td class="num"><span class="mini-bar-track"><span class="mini-bar-fill" style="{{.BarStyle}}"></span></span></td><td class="num">{{.ValueStr}}</td></tr>{{end}}
+      {{range .ByExtSize}}<tr><td class="name"><a href="{{.Href}}" title="{{.Title}}">{{.Label}}</a></td><td class="num"><span class="mini-bar-track"><span class="mini-bar-fill" style="{{.BarStyle}}"></span></span></td><td class="num">{{.ValueStr}}</td></tr>{{end}}
     </tbody></table></div>
   </div>
 </div>
@@ -551,18 +600,33 @@ var statisticsTmpl = template.Must(template.New("statistics").Parse(`
   {{else}}<div class="hint">No throttle event with a known recovery yet.</div>{{end}}
 </div>
 <script>
-// Touch screens have no hover, so a tap puts the bar's own tooltip text
-// into the caption under its chart. Desktop keeps hovering; the caption is
-// hidden there by CSS.
+// Every bar is a link to the files it counts. With a mouse, a click just
+// follows it, and hovering shows the figures.
+//
+// Touch screens have no hover, so a tap there shows the bar's figures in
+// the caption under its chart, with a "View files" link -- the tap that
+// used to reveal the figures must not instead navigate away with nothing
+// shown. Which of the two applies is decided by whether that caption is
+// displayed at all, which the stylesheet sets at the phone breakpoint, so
+// the script and the layout cannot disagree about what kind of screen this
+// is.
 document.querySelectorAll('.year-chart').forEach(function (chart) {
   var cap = chart.nextElementSibling;
   if (!cap || !cap.classList.contains('chart-tap')) return;
   chart.addEventListener('click', function (e) {
     var bar = e.target.closest('.year-bar');
     if (!bar || !bar.title) return;
+    if (getComputedStyle(cap).display === 'none') return;
+    e.preventDefault();
     chart.querySelectorAll('.year-bar.tapped').forEach(function (b) { b.classList.remove('tapped'); });
     bar.classList.add('tapped');
-    cap.textContent = bar.title;
+    cap.textContent = bar.title + ' ';
+    if (bar.getAttribute('href')) {
+      var a = document.createElement('a');
+      a.href = bar.getAttribute('href');
+      a.textContent = 'View files';
+      cap.appendChild(a);
+    }
   });
 });
 </script>

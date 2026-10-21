@@ -33,6 +33,37 @@ func (u Upload) MarkedSynced() bool {
 	return u.Status == "uploaded" && !u.GoogleMediaItemID.Valid
 }
 
+// RealUpload reports a row that gpsync actually uploaded and timed: a media
+// item ID and an uploaded_at. It is the Go side of the predicate
+// SuccessfulUploadTimestamps applies in SQL, which is what the Statistics
+// "Uploaded over time" chart counts -- a drill-down from one of its bars
+// filters with this, so the two must select the same rows (a test in this
+// package holds them to it).
+func (u Upload) RealUpload() bool {
+	return u.GoogleMediaItemID.Valid && u.UploadedAt.Valid
+}
+
+// ListAll returns every ledger row, whatever its status -- the set the
+// Statistics page's year, extension and media-type figures describe
+// (AllSizes reads the same rows, in less detail). Ordered by path, like
+// the per-status lists.
+func (db *DB) ListAll() ([]Upload, error) {
+	rows, err := db.conn.Query(`SELECT ` + uploadCols + ` FROM uploads ORDER BY first_source_path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Upload
+	for rows.Next() {
+		u, err := scanUpload(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *u)
+	}
+	return out, rows.Err()
+}
+
 func (db *DB) GetUpload(sha256 string) (*Upload, error) {
 	row := db.conn.QueryRow(`SELECT `+uploadCols+` FROM uploads WHERE sha256=?`, sha256)
 	u, err := scanUpload(row)

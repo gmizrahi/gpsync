@@ -11,7 +11,7 @@ import (
 func TestBrowse_WhenColumn_HeadedPerTab(t *testing.T) {
 	db := openTestDB(t)
 	for kind, label := range browseWhenLabels {
-		page, err := renderBrowsePage(db, kind, "", "", false, 0, "", false, nil, "", "")
+		page, err := renderBrowsePage(db, kind, "", "", false, 0, engine.BrowseFilter{}, "", false, nil, "", "")
 		if err != nil {
 			t.Fatalf("%s: %v", kind, err)
 		}
@@ -36,7 +36,7 @@ func TestBrowse_MarkedSyncedRow_IsTaggedAndARealUploadIsNot(t *testing.T) {
 	mustNoErr(t, db.EnsurePending("h-real", 1, "image/jpeg", "/lib/real.jpg", nil))
 	mustNoErr(t, db.MarkUploaded("h-real", "media-1", ""))
 
-	page, err := renderBrowsePage(db, engine.FileListUploaded, "", "", false, 0, "", false, nil, "", "")
+	page, err := renderBrowsePage(db, engine.FileListUploaded, "", "", false, 0, engine.BrowseFilter{}, "", false, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

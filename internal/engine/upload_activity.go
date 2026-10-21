@@ -99,7 +99,7 @@ func bucketUploads(uploads []statedb.UploadedAtSize, g ActivityGranularity, now 
 	end := at
 
 	for _, u := range uploads {
-		t := time.Unix(int64(u.At), 0).Local()
+		t := activityTime(u.At)
 		if t.Before(start) || !t.Before(end) {
 			continue
 		}
@@ -111,6 +111,34 @@ func bucketUploads(uploads []statedb.UploadedAtSize, g ActivityGranularity, now 
 		buckets[idx].Bytes += u.Size
 	}
 	return buckets
+}
+
+// activityTime is how the chart reads an uploaded_at: whole seconds, local
+// time. A drill-down from a bar reads it the same way (ActivityRange's
+// callers), or a file uploaded in the last half-second of a day could be
+// counted in one bar and listed under the next.
+func activityTime(at float64) time.Time {
+	return time.Unix(int64(at), 0).Local()
+}
+
+// ActivityRange is the exact span one bar covers: [from, to) in local time,
+// for the bucket containing day. It is the chart's own bucketStart and
+// nextBucket, so a drill-down from a bar lists what that bar counted --
+// calendar-aware, so a month is a month and a DST day is 23 or 25 hours.
+func ActivityRange(day time.Time, g ActivityGranularity) (from, to time.Time) {
+	from = bucketStart(day, g)
+	return from, nextBucket(from, g)
+}
+
+// InActivityRange reports whether a row is one the chart counts in that
+// span: a real upload (statedb.Upload.RealUpload, the Go side of
+// SuccessfulUploadTimestamps' SQL) whose uploaded_at falls in [from, to).
+func InActivityRange(u statedb.Upload, from, to time.Time) bool {
+	if !u.RealUpload() {
+		return false
+	}
+	t := activityTime(u.UploadedAt.Float64)
+	return !t.Before(from) && t.Before(to)
 }
 
 func activityBucketCount(g ActivityGranularity) int {
