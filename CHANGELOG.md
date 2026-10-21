@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as uploads. Rows from before this release show "—" on every tab except
   Uploaded, which has always recorded its time. `gpsync whatis` prints the
   same moment as *Status since*. (#52)
+- **Click a Statistics chart to see the files behind it.** Every bar of
+  *Uploaded over time* and *By capture year*, both segments of each
+  *By media type* bar, and every row of the extension tables now open Browse
+  showing exactly the files that element counts -- the same total, every
+  time: a bar reading 931 opens 931 files. The list says what it is showing
+  ("Captured in 2022 · 931 files") with a link to clear it, and keeps the
+  filter while you switch tabs, sort, page, search or act on a row. Browse
+  gains an **All** tab, with a Status column, for charts that count files of
+  every status. On a phone, a tap still shows a bar's figures first, now
+  with a *View files* link. (#53)
 
 ### Fixed
 

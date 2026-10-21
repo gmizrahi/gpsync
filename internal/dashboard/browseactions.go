@@ -14,7 +14,7 @@ import (
 
 // browseReturn builds the Browse URL to return to from a tab name.
 // Server-constructed allowlist -- see browseTabURL.
-func browseReturn(tab string) string { return browseTabURL(tab) }
+func browseReturn(r *http.Request) string { return browseBackURL(r) }
 
 func redirectBrowse(w http.ResponseWriter, r *http.Request, back, msg, errMsg string) {
 	v := url.Values{}
@@ -36,7 +36,7 @@ func redirectBrowse(w http.ResponseWriter, r *http.Request, back, msg, errMsg st
 // The hash is client-supplied; engine.RecheckOne refuses one that matches
 // no ledger row rather than treating it as a no-op.
 func handleBrowseRecheck(w http.ResponseWriter, r *http.Request, db *statedb.DB) {
-	back := browseReturn(r.FormValue("tab"))
+	back := browseReturn(r)
 	sha := strings.TrimSpace(r.FormValue("sha256"))
 	if sha == "" {
 		redirectBrowse(w, r, back, "", "no file was named")
@@ -65,7 +65,7 @@ func handleBrowseRecheck(w http.ResponseWriter, r *http.Request, db *statedb.DB)
 
 // handleBrowseForget drops one ledger row. The file on disk is untouched.
 func handleBrowseForget(w http.ResponseWriter, r *http.Request, db *statedb.DB) {
-	back := browseReturn(r.FormValue("tab"))
+	back := browseReturn(r)
 	sha := strings.TrimSpace(r.FormValue("sha256"))
 	if sha == "" {
 		redirectBrowse(w, r, back, "", "no file was named")

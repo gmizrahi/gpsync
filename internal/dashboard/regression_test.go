@@ -22,7 +22,7 @@ func TestRenderBrowsePage_OffsetZero_PrevLinkAbsent(t *testing.T) {
 	db := openTestDB(t)
 	mustNoErr(t, db.EnsurePending("h1", 10, "image/jpeg", "/lib/a.jpg", nil))
 
-	page, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false, nil, "", "")
+	page, err := renderBrowsePage(db, "pending", "", "", false, 0, engine.BrowseFilter{}, config.ThemeDark, false, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +593,7 @@ func TestRenderBrowsePage_UploadedNeedsReviewIgnored_Render(t *testing.T) {
 		{engine.FileListIgnored, "ignored-file.jpg", "<title>Ignored —"},
 	}
 	for _, c := range cases {
-		page, err := renderBrowsePage(db, c.kind, "", "", false, 0, config.ThemeDark, false, nil, "", "")
+		page, err := renderBrowsePage(db, c.kind, "", "", false, 0, engine.BrowseFilter{}, config.ThemeDark, false, nil, "", "")
 		if err != nil {
 			t.Fatalf("%s: %v", c.kind, err)
 		}
@@ -740,7 +740,8 @@ func TestRenderStatisticsPage_ActivityChartsAndSelector(t *testing.T) {
 		// capture-year bars carry a title too now (the phone layout shows
 		// it on tap), so a page-wide count would include them.
 		activity := page[strings.Index(page, "<h2>Uploaded over time</h2>"):strings.Index(page, "<h2>By capture year</h2>")]
-		if n := strings.Count(activity, `<div class="year-bar" title=`); n != c.bars*2 {
+		// Bars are <a> now, links to the files they count (issue #53).
+		if n := strings.Count(activity, `<a class="year-bar"`); n != c.bars*2 {
 			t.Errorf("%s: %d activity bars, want %d (%d buckets x 2 charts)", c.gran, n, c.bars*2, c.bars)
 		}
 		// Every bar carries its number, at every granularity -- the daily
@@ -1002,7 +1003,7 @@ func TestPages_UseKBMBGBLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	browse, err := renderBrowsePage(db, "pending", "", "", false, 0, config.ThemeDark, false, nil, "", "")
+	browse, err := renderBrowsePage(db, "pending", "", "", false, 0, engine.BrowseFilter{}, config.ThemeDark, false, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

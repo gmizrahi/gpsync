@@ -2,10 +2,15 @@ package engine
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/gmizrahi/gpsync/internal/extensions"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
 
@@ -27,6 +32,10 @@ const (
 	FileListUploaded    FileListKind = "uploaded"
 	FileListNeedsReview FileListKind = "needs_review"
 	FileListIgnored     FileListKind = "ignored"
+	// FileListAll is every row whatever its status -- what the Statistics
+	// page's year, extension and media-type figures describe, so a
+	// drill-down from one of them can list exactly what it counted.
+	FileListAll FileListKind = "all"
 )
 
 // SortKey selects which column BrowseFiles sorts by, before paging.
@@ -78,6 +87,9 @@ type BrowseQuery struct {
 	SortDesc bool
 	Offset   int
 	Limit    int
+	// Filter narrows the list to what one Statistics chart element
+	// counted. The zero value filters nothing.
+	Filter BrowseFilter
 }
 
 // BrowseResult is one page of BrowseFiles' matching rows, plus enough to
@@ -112,11 +124,27 @@ func BrowseFiles(db *statedb.DB, q BrowseQuery) (BrowseResult, error) {
 		all, err = db.ListByStatus("needs_review")
 	case FileListIgnored:
 		all, err = db.ListByStatus("ignored")
+	case FileListAll:
+		all, err = db.ListAll()
 	default:
 		return BrowseResult{}, fmt.Errorf("unknown file list kind %q", q.Kind)
 	}
 	if err != nil {
 		return BrowseResult{}, err
+	}
+
+	if q.Filter.Active() {
+		match, err := q.Filter.matcher(db, time.Now())
+		if err != nil {
+			return BrowseResult{}, err
+		}
+		filtered := all[:0]
+		for _, u := range all {
+			if match(u) {
+				filtered = append(filtered, u)
+			}
+		}
+		all = filtered
 	}
 
 	if q.Search != "" {
@@ -231,4 +259,160 @@ func filterByStatus(db *statedb.DB, status string) ([]statedb.Upload, error) {
 		}
 	}
 	return out, nil
+}
+
+// BrowseFilter narrows a Browse list to the files one Statistics chart
+// element counted: a capture-year bar, an extension row, a media-type
+// segment, or an "uploaded over time" bar.
+//
+// The rule it exists to keep: a list opened from a bar contains EXACTLY the
+// files that bar counted. A bar reading 931 that opens 912 files is worse
+// than no link. So nothing here re-derives a chart's definition; each
+// condition calls the function the chart itself uses -- CaptureYearLabel,
+// extensions.KindOf/ExtOf, IsOutstanding, InActivityRange -- and a test
+// holds every bucket's list to its count.
+//
+// Every field arrives from a URL. ParseBrowseFilter validates each one
+// against a closed set and drops anything else, and the filtering happens
+// in Go over rows already loaded, so no value is ever interpolated into
+// SQL.
+type BrowseFilter struct {
+	// Kind is "photo", "video" or "other" (extensions.KindOf's three
+	// outcomes; "other" is KindUnknown).
+	Kind string
+	// Ext is an extension exactly as extensions.ExtOf returns it:
+	// lowercase, no dot, or "(none)".
+	Ext string
+	// Year is a capture-year bucket: "2019", "older" or "unknown".
+	Year string
+	// Outstanding keeps only work still ahead (IsOutstanding) -- the
+	// media-type bars' pending segment.
+	Outstanding bool
+	// UploadedOn, with Span, selects one "uploaded over time" bar: the
+	// bucket of that granularity containing this local day. Zero means no
+	// upload-time condition.
+	UploadedOn time.Time
+	Span       ActivityGranularity
+}
+
+// Active reports whether the filter narrows anything.
+func (f BrowseFilter) Active() bool {
+	return f.Kind != "" || f.Ext != "" || f.Year != "" || f.Outstanding || !f.UploadedOn.IsZero()
+}
+
+var (
+	browseFilterYear = regexp.MustCompile(`^[0-9]{4}$`)
+	browseFilterExt  = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
+)
+
+// ParseBrowseFilter reads a filter from a query string, keeping only values
+// it recognizes. An unknown value is dropped rather than rejected: the
+// links that carry these are built by the Statistics page, so anything
+// else is a hand-edited URL, and the banner shows exactly which conditions
+// survived.
+func ParseBrowseFilter(v url.Values) BrowseFilter {
+	var f BrowseFilter
+	switch k := v.Get("kind"); k {
+	case "photo", "video", "other":
+		f.Kind = k
+	}
+	if e := v.Get("ext"); browseFilterExt.MatchString(e) || e == "(none)" {
+		f.Ext = e
+	}
+	if y := v.Get("year"); browseFilterYear.MatchString(y) || y == "older" || y == "unknown" {
+		f.Year = y
+	}
+	f.Outstanding = v.Get("st") == "outstanding"
+	if d, err := time.ParseInLocation("2006-01-02", v.Get("up"), time.Local); err == nil {
+		f.UploadedOn = d
+		f.Span = ParseActivityGranularity(v.Get("span"))
+	}
+	return f
+}
+
+// Values is the inverse of ParseBrowseFilter, for building links.
+func (f BrowseFilter) Values() url.Values {
+	v := url.Values{}
+	if f.Kind != "" {
+		v.Set("kind", f.Kind)
+	}
+	if f.Ext != "" {
+		v.Set("ext", f.Ext)
+	}
+	if f.Year != "" {
+		v.Set("year", f.Year)
+	}
+	if f.Outstanding {
+		v.Set("st", "outstanding")
+	}
+	if !f.UploadedOn.IsZero() {
+		v.Set("up", f.UploadedOn.Format("2006-01-02"))
+		v.Set("span", string(f.Span))
+	}
+	return v
+}
+
+// OlderThan is the first year the capture-year chart shows on its own;
+// its "Older" bar folds every real year before it. ok is false when the
+// chart has no Older bar, in which case "older" matches nothing.
+func OlderThan(db *statedb.DB) (year int, ok bool, err error) {
+	s, err := BuildStatistics(db)
+	if err != nil {
+		return 0, false, err
+	}
+	if len(s.ByYear) < 2 || s.ByYear[0].Label != "Older" {
+		return 0, false, nil
+	}
+	y, err := strconv.Atoi(s.ByYear[1].Label)
+	if err != nil {
+		return 0, false, nil
+	}
+	return y, true, nil
+}
+
+// matcher builds the predicate for one filter. "older" is the only
+// condition that depends on the library as a whole -- which years the chart
+// shows on their own -- so it is resolved once here, from the chart's own
+// BuildStatistics, rather than per row.
+func (f BrowseFilter) matcher(db *statedb.DB, now time.Time) (func(statedb.Upload) bool, error) {
+	olderThan, hasOlder := 0, false
+	if f.Year == "older" {
+		var err error
+		if olderThan, hasOlder, err = OlderThan(db); err != nil {
+			return nil, err
+		}
+	}
+	var from, to time.Time
+	if !f.UploadedOn.IsZero() {
+		from, to = ActivityRange(f.UploadedOn, f.Span)
+	}
+	kinds := map[string]extensions.Kind{"photo": extensions.KindPhoto, "video": extensions.KindVideo, "other": extensions.KindUnknown}
+
+	return func(u statedb.Upload) bool {
+		if f.Kind != "" && extensions.KindOf(u.FirstSourcePath) != kinds[f.Kind] {
+			return false
+		}
+		if f.Ext != "" && extensions.ExtOf(u.FirstSourcePath) != f.Ext {
+			return false
+		}
+		if f.Outstanding && !IsOutstanding(u.Status) {
+			return false
+		}
+		if !f.UploadedOn.IsZero() && !InActivityRange(u, from, to) {
+			return false
+		}
+		if f.Year != "" {
+			label := CaptureYearLabel(u.FirstSourcePath, u.CapturedAt, now)
+			switch f.Year {
+			case "unknown":
+				return label == "Unknown"
+			case "older":
+				y, err := strconv.Atoi(label)
+				return hasOlder && err == nil && y < olderThan
+			default:
+				return label == f.Year
+			}
+		}
+		return true
+	}, nil
 }

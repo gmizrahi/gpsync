@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"database/sql"
 	"sort"
 	"strconv"
 	"time"
@@ -95,6 +96,40 @@ func yearFromPath(path string) (int, bool) {
 	return t.Year(), true
 }
 
+// IsOutstanding reports a status that is work still ahead: pending, and
+// failed_retryable, which every Uploader.Run sweeps back to pending (the
+// same reason BuildForecast counts it). It is the "pending" segment of the
+// media-type bars, and the filter behind clicking one.
+func IsOutstanding(status string) bool {
+	return status == "pending" || status == "failed_retryable"
+}
+
+// CaptureYearLabel is the year-chart bucket a file belongs in: its year as
+// text, or "Unknown". It is the one definition both the chart and a
+// drill-down from it use, so the list a bar opens is exactly what it
+// counted.
+//
+// The path's own date wins over captured_at (see yearFromPath). Otherwise
+// captured_at's year, in UTC, if it is plausible: some cameras and apps
+// write garbage EXIF dates -- the raw value really is what captured_at
+// holds -- and a year like 4500 would flatten every real bar on a chart
+// scaled to its largest bucket, so anything before
+// statisticsMinPlausibleYear or more than a year ahead is Unknown.
+//
+// "Older" is not decided here: it depends on which years the whole
+// library has, see BuildStatistics.
+func CaptureYearLabel(path string, capturedAt sql.NullFloat64, now time.Time) string {
+	if y, ok := yearFromPath(path); ok {
+		return strconv.Itoa(y)
+	}
+	if capturedAt.Valid {
+		if y := time.Unix(int64(capturedAt.Float64), 0).UTC().Year(); y >= statisticsMinPlausibleYear && y <= now.Year()+1 {
+			return strconv.Itoa(y)
+		}
+	}
+	return "Unknown"
+}
+
 // KindStat is one media-type row on the Statistics page. Unlike
 // CountStat it carries a PENDING figure alongside the total, because the
 // card shows both as a pair of bars. Total minus pending is not the same
@@ -129,6 +164,7 @@ func BuildStatistics(db *statedb.DB) (Statistics, error) {
 	}
 
 	var s Statistics
+	now := time.Now()
 	kindAgg := map[extensions.Kind]*KindStat{
 		extensions.KindPhoto:   {Label: "Photos"},
 		extensions.KindVideo:   {Label: "Videos"},
@@ -147,14 +183,11 @@ func BuildStatistics(db *statedb.DB) (Statistics, error) {
 		// failed_retryable counts as outstanding for the same reason
 		// BuildForecast treats it that way: every Uploader.Run sweeps it
 		// back to pending, so it is work still ahead, not work written off.
-		switch r.Status {
-		case "uploaded":
+		switch {
+		case r.Status == "uploaded":
 			kindAgg[kind].UploadedCount++
 			kindAgg[kind].UploadedBytes += r.Size
-		case "pending", "failed_retryable":
-			// failed_retryable counts as outstanding for the same reason
-			// BuildForecast treats it that way: every Uploader.Run sweeps
-			// it back to pending, so it is work still ahead.
+		case IsOutstanding(r.Status):
 			kindAgg[kind].PendingCount++
 			kindAgg[kind].PendingBytes += r.Size
 		}
@@ -166,23 +199,7 @@ func BuildStatistics(db *statedb.DB) (Statistics, error) {
 		extAgg[ext].Count++
 		extAgg[ext].Bytes += r.Size
 
-		year := "Unknown"
-		if y, ok := yearFromPath(r.Path); ok {
-			year = strconv.Itoa(y)
-		} else if r.CapturedAt.Valid {
-			if y := time.Unix(int64(r.CapturedAt.Float64), 0).UTC().Year(); y >= statisticsMinPlausibleYear && y <= time.Now().Year()+1 {
-				year = strconv.Itoa(y)
-			}
-			// Outside that range: some cameras and apps write garbage
-			// EXIF capture dates (not a parsing bug here; the raw value
-			// really is what is stored in captured_at), which is how a
-			// year like 4500 reaches the chart. A
-			// file like that has no MEANINGFUL capture year, so it
-			// folds into the same "Unknown" bucket as a missing date
-			// rather than plotting a bar that makes every real year
-			// look flat by comparison (the chart's own scale is
-			// relative to whichever bucket is largest).
-		}
+		year := CaptureYearLabel(r.Path, r.CapturedAt, now)
 		if yearAgg[year] == nil {
 			yearAgg[year] = &CountStat{Label: year}
 		}

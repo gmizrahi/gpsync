@@ -219,7 +219,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		sortKey := engine.SortKey(q.Get("sort"))
 		sortDesc := q.Get("dir") == "desc"
 		bcfg := wc.Config()
-		page, err := renderBrowsePage(db, kind, q.Get("q"), sortKey, sortDesc, offset, bcfg.Theme, bcfg.DashboardAuthEnabled,
+		page, err := renderBrowsePage(db, kind, q.Get("q"), sortKey, sortDesc, offset, engine.ParseBrowseFilter(q), bcfg.Theme, bcfg.DashboardAuthEnabled,
 			bcfg.SourceFolders, q.Get("synced"), q.Get("error"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

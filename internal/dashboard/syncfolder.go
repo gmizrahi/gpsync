@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gmizrahi/gpsync/internal/config"
+	"github.com/gmizrahi/gpsync/internal/engine"
 )
 
 // folderIsConfigured reports whether folder sits inside one of the
@@ -48,7 +49,7 @@ func handleSyncFolder(w http.ResponseWriter, r *http.Request, wc Controller) {
 	// Rebuilt from a validated tab name rather than echoing a URL back
 	// from the form: nothing user-supplied reaches the Location header,
 	// which is the only way to be sure it cannot point off-site.
-	back := browseTabURL(r.FormValue("tab"))
+	back := browseBackURL(r)
 
 	redirect := func(msg, errMsg string) {
 		v := url.Values{}
@@ -84,9 +85,25 @@ func handleSyncFolder(w http.ResponseWriter, r *http.Request, wc Controller) {
 // return URL from the form and tried to prove it was local -- twice with
 // a check that missed a leading backslash and control characters. Not
 // accepting the input at all removes the question.
+// browseBackURL is where a form on Browse returns to: the tab it was
+// posted from, with the drill-down filter it was showing, so acting on one
+// row of a filtered list does not drop you back into the whole tab.
+//
+// Still server-constructed: the tab passes browseTabURL's allowlist, and
+// the filter is re-parsed through engine.ParseBrowseFilter, which keeps
+// only values from closed sets -- nothing from the request reaches the
+// Location header unvalidated, and none of it can change the path.
+func browseBackURL(r *http.Request) string {
+	back := browseTabURL(r.FormValue("tab"))
+	if f := engine.ParseBrowseFilter(r.Form); f.Active() {
+		back += "&" + f.Values().Encode()
+	}
+	return back
+}
+
 func browseTabURL(tab string) string {
 	switch tab {
-	case "pending", "failed_retryable", "failed_permanent", "uploaded", "needs_review", "ignored":
+	case "pending", "failed_retryable", "failed_permanent", "uploaded", "needs_review", "ignored", "all":
 		return "/browse?type=" + tab
 	default:
 		return "/browse?type=pending"

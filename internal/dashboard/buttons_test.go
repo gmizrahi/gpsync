@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"github.com/gmizrahi/gpsync/internal/engine"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -86,7 +87,7 @@ func TestTemplates_NoButtonInsideALink(t *testing.T) {
 // through formaction/formmethod, still by GET.
 func TestBrowseToolbar_OneFolderPickerForBothActions(t *testing.T) {
 	db := openTestDB(t)
-	page, err := renderBrowsePage(db, "pending", "", "", false, 0, "", false, []string{`C:\Photos`, `D:\More`}, "", "")
+	page, err := renderBrowsePage(db, "pending", "", "", false, 0, engine.BrowseFilter{}, "", false, []string{`C:\Photos`, `D:\More`}, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
