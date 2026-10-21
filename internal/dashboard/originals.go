@@ -109,10 +109,12 @@ var originalsTmpl = template.Must(template.New("originals").Parse(`
 <form method="post" action="/originals/resolve">
   <input type="hidden" name="i" value="{{.Index}}">
   <input type="hidden" name="sha256" value="{{.SHA256}}">
-  {{if gt .Index 0}}<a href="/originals?i={{.PrevIndex}}"><button type="button" class="btn-sm">&larr; Go Back</button></a>{{end}}
-  <button type="submit" name="action" value="queue">Queue &amp; Upload</button>
-  <button type="submit" name="action" value="ignore" class="btn-sm">Add to Ignore List</button>
-  <a href="/originals?i={{.NextIndex}}"><button type="button" class="btn-sm">Decide Later</button></a>
+  <div class="btn-row">
+    {{if gt .Index 0}}<a class="btn-secondary" href="/originals?i={{.PrevIndex}}">&larr; Go Back</a>{{end}}
+    <button type="submit" name="action" value="queue">Queue &amp; Upload</button>
+    <button type="submit" name="action" value="ignore" class="btn-secondary">Add to Ignore List</button>
+    <a class="btn-secondary" href="/originals?i={{.NextIndex}}">Decide Later</a>
+  </div>
 </form>
 {{end}}
 {{if .UploadedFromOriginals}}

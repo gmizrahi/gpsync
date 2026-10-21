@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dashboard buttons are consistent, and Browse is readable again.** Each
+  Browse row's Re-check and Forget were two full-size buttons stacked on top
+  of each other, doubling every row's height: the cell's layout class had
+  never been given a style. They are now compact and side by side. Browse's
+  two identical folder dropdowns -- one per folder action, ending at
+  different points -- are one dropdown shared by both actions. Duplicates and
+  Originals no longer mix two button sizes in one row, the Sign in file
+  picker matches the theme, and four links that wrapped a button (invalid
+  HTML, two tab stops each) are plain links. (#51)
+
 ## [0.3.3]
 
 Two bug fixes, both about files the scan got wrong.

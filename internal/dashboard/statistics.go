@@ -468,7 +468,7 @@ var statisticsTmpl = template.Must(template.New("statistics").Parse(`
 <div class="card">
   <h2>Sync progress</h2>
   {{if .ForecastDone}}
-  <p class="prose"><strong>Everything tracked has been uploaded.</strong> {{.ForecastSynced}} complete.</p>
+  <p><strong>Everything tracked has been uploaded.</strong> {{.ForecastSynced}} complete.</p>
   {{else}}
   <div class="row"><span class="label">Uploaded</span><span>{{.ForecastSynced}} &mdash; {{.ForecastPercentBytes}}</span></div>
   <div class="bar"><span class="bar-fill" style="{{.ForecastBarStyle}}"></span></div>

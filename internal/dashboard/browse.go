@@ -74,26 +74,27 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
 </div>
 {{if .Message}}<div class="banner banner-ok">{{.Message}}</div>{{end}}
 {{if .ErrorMessage}}<div class="banner banner-err">{{.ErrorMessage}}</div>{{end}}
+<div class="browse-toolbar">
 {{if .SourceFolders}}
-<form class="search-row" method="post" action="/sync-folder">
+{{/* One folder picker for both folder actions. The second button
+     overrides the form's action and method, so it still lands on the
+     /mark-synced confirmation page by GET exactly as before -- it only
+     reads "folder", so the extra "tab" it now carries is ignored. */}}
+<form method="post" action="/sync-folder">
   <input type="hidden" name="tab" value="{{.Kind}}">
-  <select name="folder">
+  <select name="folder" aria-label="Source folder">
     {{range .SourceFolders}}<option value="{{.}}">{{.}}</option>{{end}}
   </select>
   <button type="submit">Sync this folder now</button>
-</form>
-<form class="search-row" method="get" action="/mark-synced">
-  <select name="folder">
-    {{range .SourceFolders}}<option value="{{.}}">{{.}}</option>{{end}}
-  </select>
-  <button type="submit" title="Record these files as already in Google Photos, without uploading">Mark as already synced…</button>
+  <button type="submit" class="btn-secondary" formaction="/mark-synced" formmethod="get" title="Record these files as already in Google Photos, without uploading">Mark as already synced…</button>
 </form>
 {{end}}
-<form class="search-row" method="get" action="/browse">
+<form method="get" action="/browse">
   <input type="hidden" name="type" value="{{.Kind}}">
-  <input type="text" name="q" value="{{.Query}}" placeholder="Filter by path or hash...">
-  <button type="submit">Search</button>
+  <input type="text" class="tb-field-wide" name="q" value="{{.Query}}" placeholder="Filter by path or hash..." aria-label="Filter by path or hash">
+  <button type="submit" class="btn-secondary tb-search">Search</button>
 </form>
+</div>
 <div class="card">
   <div class="table-wrap">
   <table class="browse">
@@ -103,7 +104,7 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
       <th class="center">Actions</th>
     </tr></thead>
     <tbody>
-      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></td></tr>{{end}}
+      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center b-actions"><div class="row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" class="btn-sm" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" class="btn-sm" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></div></td></tr>{{end}}
       {{if not .Rows}}<tr><td colspan="8">No matching files.</td></tr>{{end}}
     </tbody>
   </table>
