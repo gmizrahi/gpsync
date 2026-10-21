@@ -18,6 +18,19 @@ type Upload struct {
 	LastErrorCode     sql.NullString
 	LastErrorMessage  sql.NullString
 	AttemptCount      int
+	// StatusChangedAt is when the row last entered its status, or last
+	// failed again -- see the uploads.status_changed_at column. NULL on rows
+	// from before it was recorded.
+	StatusChangedAt sql.NullFloat64
+}
+
+// MarkedSynced reports a row recorded as uploaded by `gpsync mark-synced`
+// (or the dashboard's Mark as already synced) rather than by an upload:
+// status 'uploaded' with no media item ID, because nothing was sent. Its
+// uploaded_at is when it was MARKED. Statistics draws the same line in
+// SQL (google_media_item_id IS NOT NULL) to count only real uploads.
+func (u Upload) MarkedSynced() bool {
+	return u.Status == "uploaded" && !u.GoogleMediaItemID.Valid
 }
 
 func (db *DB) GetUpload(sha256 string) (*Upload, error) {

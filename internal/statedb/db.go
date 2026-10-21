@@ -68,6 +68,10 @@ func Open() (*DB, error) {
 	if err := migrateUploadsVerified(conn); err != nil {
 		return nil, err
 	}
+	if _, err := conn.Exec(statusChangedTriggers); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("installing status-change triggers: %w", err)
+	}
 	if err := migrateDropAlbumTables(conn); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("dropping album tables: %w", err)

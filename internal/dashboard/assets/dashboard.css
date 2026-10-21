@@ -422,6 +422,7 @@
   table.browse td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; white-space: nowrap; }
   table.browse td.size, table.browse td.center { color: var(--text-dim); font-variant-numeric: tabular-nums; }
   table.browse td.center, table.browse th.center { text-align: center; }
+  table.browse td.b-when { color: var(--text-dim); font-variant-numeric: tabular-nums; }
   .table-wrap { overflow-x: auto; }
   .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; font-size: 0.85rem; color: var(--text-dim); }
   .pager a { color: var(--info); }
@@ -579,6 +580,12 @@
     .browse-toolbar { grid-template-columns: 1fr 1fr; align-items: stretch; }
     .browse-toolbar select, .browse-toolbar .tb-field-wide, .browse-toolbar .tb-search { grid-column: 1 / -1; }
     table.browse td.b-actions { grid-column: 1 / -1; padding-top: 0.35rem; }
+    /* A label, a date and a time, plus sometimes a "marked synced" tag:
+       half the card's width broke it between the date and the time. */
+    table.browse td.b-when { grid-column: 1 / -1; }
+    /* dense: a full-width cell otherwise strands the half-width one before
+       it alone on its row, leaving a hole beside it. */
+    table.browse tbody tr { grid-auto-flow: row dense; }
     .browse-tabs a, .chart-tabs a { padding: 0.5rem 0.9rem; }
 
     /* Status: stop stretching to fill the screen height. On a desktop
