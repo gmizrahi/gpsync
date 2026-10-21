@@ -41,14 +41,14 @@ func scanUpload(row interface {
 	var u Upload
 	err := row.Scan(&u.SHA256, &u.Size, &u.MimeType, &u.Status, &u.GoogleMediaItemID,
 		&u.FirstSourcePath, &u.CapturedAt, &u.UploadedAt, &u.LastErrorCode,
-		&u.LastErrorMessage, &u.AttemptCount)
+		&u.LastErrorMessage, &u.AttemptCount, &u.StatusChangedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &u, nil
 }
 
-const uploadCols = `sha256, size, mime_type, status, google_media_item_id, first_source_path, captured_at, uploaded_at, last_error_code, last_error_message, attempt_count`
+const uploadCols = `sha256, size, mime_type, status, google_media_item_id, first_source_path, captured_at, uploaded_at, last_error_code, last_error_message, attempt_count, status_changed_at`
 
 func likeAnyPrefix(column string, prefixes []string) (string, []any) {
 	clause := "("

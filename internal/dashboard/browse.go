@@ -25,8 +25,13 @@ type browseRowData struct {
 	Size     string
 	Type     string
 	Captured string
-	Attempts int
-	Error    string
+	// When is RowTime, formatted; "—" when the ledger does not know it.
+	When string
+	// MarkedSynced flags an Uploaded row recorded by Mark as already synced,
+	// whose When is the time of marking, not of an upload.
+	MarkedSynced bool
+	Attempts     int
+	Error        string
 }
 
 // sortColumn is one clickable, sort-aware table header. Href always points
@@ -44,6 +49,7 @@ type browsePageData struct {
 	Kind        string
 	Query       string
 	ShowError   bool
+	WhenLabel   string
 	Columns     []sortColumn
 	Rows        []browseRowData
 	Total       int
@@ -104,8 +110,8 @@ var browseTmpl = template.Must(template.New("browse").Parse(`
       <th class="center">Actions</th>
     </tr></thead>
     <tbody>
-      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center b-actions"><div class="row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" class="btn-sm" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" class="btn-sm" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></div></td></tr>{{end}}
-      {{if not .Rows}}<tr><td colspan="8">No matching files.</td></tr>{{end}}
+      {{range .Rows}}<tr><td class="b-path">{{.Path}}</td><td class="b-name">{{.Filename}}</td><td class="size" data-label="Size">{{.Size}}</td><td data-label="Type">{{.Type}}</td><td class="center" data-label="Captured">{{.Captured}}</td><td class="b-when" data-label="{{$.WhenLabel}}">{{.When}}{{if .MarkedSynced}} <span class="badge badge-dim" title="Recorded with Mark as already synced: gpsync never uploaded this file, and the time is when it was marked">marked synced</span>{{end}}</td><td class="center" data-label="Attempts">{{.Attempts}}</td>{{if $.ShowError}}<td class="b-err">{{.Error}}</td>{{end}}<td class="center b-actions"><div class="row-actions"><form method="post" action="/browse/recheck"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" class="btn-sm" title="Check whether this file is still on disk">Re-check</button></form><form method="post" action="/browse/forget" onsubmit="return confirm('Forget this file? The file on disk is not touched.');"><input type="hidden" name="sha256" value="{{.SHA256}}"><input type="hidden" name="tab" value="{{$.Kind}}"><button type="submit" class="btn-sm" title="Remove this entry from the ledger; the file is not deleted">Forget</button></form></div></td></tr>{{end}}
+      {{if not .Rows}}<tr><td colspan="9">No matching files.</td></tr>{{end}}
     </tbody>
   </table>
   </div>
@@ -150,7 +156,24 @@ var browseColumns = []struct {
 	{engine.SortKeySize, "Size", false},
 	{engine.SortKeyType, "Type", false},
 	{engine.SortKeyCaptured, "Captured", true},
+	// Left-aligned, unlike Captured: a "marked synced" tag trails some of
+	// these dates, and centred they would no longer line up.
+	{engine.SortKeyWhen, "", false}, // labelled per tab -- see browseWhenLabels
 	{engine.SortKeyAttempts, "Attempts", true},
+}
+
+// browseWhenLabels heads the timestamp column, which means something
+// different on each tab: RowTime is uploaded_at on Uploaded and the time
+// the row entered its status everywhere else. Failed rather than "Last
+// failed" on the permanent tab, because a permanent failure is not
+// retried, so there is no later failure for it to be the last of.
+var browseWhenLabels = map[engine.FileListKind]string{
+	engine.FileListPending:         "Queued",
+	engine.FileListFailedRetryable: "Last failed",
+	engine.FileListFailedPermanent: "Failed",
+	engine.FileListUploaded:        "Uploaded",
+	engine.FileListNeedsReview:     "Flagged",
+	engine.FileListIgnored:         "Ignored",
 }
 
 func browseLink(kind engine.FileListKind, query string, sortKey engine.SortKey, sortDesc bool, offset int) string {
@@ -190,8 +213,12 @@ func buildSortColumns(kind engine.FileListKind, query string, sortKey engine.Sor
 				indicator = " ↓"
 			}
 		}
+		label := c.Label
+		if c.Key == engine.SortKeyWhen {
+			label = browseWhenLabels[kind]
+		}
 		cols[i] = sortColumn{
-			Label:     c.Label,
+			Label:     label,
 			Href:      browseLink(kind, query, c.Key, nextDesc, 0),
 			Active:    active,
 			Indicator: indicator,
@@ -219,15 +246,23 @@ func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, so
 		if u.CapturedAt.Valid {
 			captured = time.Unix(int64(u.CapturedAt.Float64), 0).Format("2006-01-02")
 		}
+		// Local time, minutes: the same local-day reading Statistics uses,
+		// precise enough to order a day's work without a column of seconds.
+		when := "—"
+		if at, ok := engine.RowTime(u); ok {
+			when = time.Unix(int64(at), 0).Format("2006-01-02 15:04")
+		}
 		rows[i] = browseRowData{
-			SHA256:   u.SHA256,
-			Path:     pathx.DisplayDir(u.FirstSourcePath),
-			Filename: pathx.DisplayName(u.FirstSourcePath),
-			Size:     humanBytes(u.Size),
-			Type:     mediaKindLabel(u.MimeType),
-			Captured: captured,
-			Attempts: u.AttemptCount,
-			Error:    errMsg,
+			SHA256:       u.SHA256,
+			Path:         pathx.DisplayDir(u.FirstSourcePath),
+			Filename:     pathx.DisplayName(u.FirstSourcePath),
+			Size:         humanBytes(u.Size),
+			Type:         mediaKindLabel(u.MimeType),
+			Captured:     captured,
+			When:         when,
+			MarkedSynced: u.MarkedSynced(),
+			Attempts:     u.AttemptCount,
+			Error:        errMsg,
 		}
 	}
 
@@ -235,6 +270,7 @@ func renderBrowsePage(db *statedb.DB, kind engine.FileListKind, query string, so
 		Kind:      string(kind),
 		Query:     query,
 		ShowError: browseShowErrorKinds[kind],
+		WhenLabel: browseWhenLabels[kind],
 		Columns:   buildSortColumns(kind, query, sortKey, sortDesc),
 		Rows:      rows,
 		Total:     res.Total,

@@ -52,6 +52,11 @@ func whatisFile(db *statedb.DB, path string) error {
 	} else if row.Status == "uploaded" {
 		fmt.Printf("  %s\n", colDim("marked synced via `gpsync mark-synced` — never uploaded by gpsync, so there's no media item id"))
 	}
+	// The dashboard's Browse shows the same moment as Queued / Last failed /
+	// Ignored / Flagged. An uploaded row already has "Uploaded at" below.
+	if row.Status != "uploaded" && row.StatusChangedAt.Valid {
+		fmt.Printf("  %s %s\n", colHeader("Status since:"), time.Unix(int64(row.StatusChangedAt.Float64), 0).Format("2006-01-02 15:04:05"))
+	}
 	if row.UploadedAt.Valid && row.UploadedAt.Float64 > 0 {
 		fmt.Printf("  %s %s\n", colHeader("Uploaded at:"), time.Unix(int64(row.UploadedAt.Float64), 0).Format("2006-01-02 15:04:05"))
 	}

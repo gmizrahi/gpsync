@@ -20,6 +20,15 @@ CREATE TABLE IF NOT EXISTS uploads (
     last_error_code TEXT,
     last_error_message TEXT,
     attempt_count INTEGER NOT NULL DEFAULT 0,
+    -- status_changed_at is when the row last entered its status -- or, for
+    -- a failure, last failed again, since a repeat failure keeps the status
+    -- and bumps attempt_count. Browse shows it as Queued / Last failed /
+    -- Ignored / Flagged. It is maintained by the triggers in
+    -- statusChangedTriggers, never by hand: fourteen statements change a
+    -- row's status, and a timestamp each of them had to remember to set
+    -- would be one forgotten call site away from silently wrong. NULL for
+    -- rows from before it existed, which Browse shows as unknown.
+    status_changed_at REAL,
     -- missing_since / missing_checked_at / missing_confirmed_at track a file
     -- that is no longer at first_source_path. A scan FLAGS it (missing_since,
     -- kept from the first sighting; missing_checked_at, refreshed every time
@@ -255,6 +264,7 @@ func migrateUploadsVerified(conn *sql.DB) error {
 		"missing_since":        `ALTER TABLE uploads ADD COLUMN missing_since REAL`,
 		"missing_checked_at":   `ALTER TABLE uploads ADD COLUMN missing_checked_at REAL`,
 		"missing_confirmed_at": `ALTER TABLE uploads ADD COLUMN missing_confirmed_at REAL`,
+		"status_changed_at":    `ALTER TABLE uploads ADD COLUMN status_changed_at REAL`,
 	} {
 		if existing[col] {
 			continue
@@ -359,3 +369,39 @@ func (db *DB) MigrateToNeedsReview(sha256 string) error {
 	)
 	return err
 }
+
+// statusChangedTriggers keeps uploads.status_changed_at current: stamped
+// when a row is inserted, and again whenever its status changes or its
+// attempt_count does. MarkFailed is the only statement that bumps
+// attempt_count, and it does so on every failure, so a file failing again
+// in the same status counts -- "Last failed" means the latest failure, not
+// the first. The two resets to 0 always change the status too.
+//
+// Applied by Open AFTER migrateUploadsVerified, not as part of schema.
+// SQLite would accept it earlier -- it resolves a trigger's body when the
+// trigger fires, not when it is created, so creating one that names a
+// column the table does not have yet succeeds (measured). But if the
+// migration then failed, the ledger would hold a trigger with no column,
+// and every status change would fail with "no such column". Installing it
+// after the migration means the trigger never exists without its column.
+//
+// The trigger's own UPDATE writes only status_changed_at, which is not in
+// the UPDATE OF list, so it cannot re-fire itself.
+//
+// unixepoch('subsec') is REAL seconds since the epoch, the same unit as
+// every other timestamp in this table (statedb.now()). It needs SQLite
+// 3.42+; modernc.org/sqlite carries 3.53.
+const statusChangedTriggers = `
+CREATE TRIGGER IF NOT EXISTS uploads_status_changed_on_insert
+AFTER INSERT ON uploads
+BEGIN
+    UPDATE uploads SET status_changed_at = unixepoch('subsec') WHERE sha256 = NEW.sha256;
+END;
+
+CREATE TRIGGER IF NOT EXISTS uploads_status_changed_on_update
+AFTER UPDATE OF status, attempt_count ON uploads
+WHEN NEW.status IS NOT OLD.status OR NEW.attempt_count IS NOT OLD.attempt_count
+BEGIN
+    UPDATE uploads SET status_changed_at = unixepoch('subsec') WHERE sha256 = NEW.sha256;
+END;
+`

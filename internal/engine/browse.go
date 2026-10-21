@@ -42,7 +42,26 @@ const (
 	SortKeyType     SortKey = "type"
 	SortKeyCaptured SortKey = "captured"
 	SortKeyAttempts SortKey = "attempts"
+	// SortKeyWhen sorts by RowTime -- Browse's per-tab timestamp column.
+	SortKeyWhen SortKey = "when"
 )
+
+// RowTime is the moment Browse's timestamp column shows for a row: when it
+// was uploaded on the Uploaded tab, otherwise when it entered its current
+// status (or, for a failure, last failed). ok is false when the ledger has
+// no honest value -- a row from before status_changed_at was recorded --
+// and the caller must show it as unknown, never as some default date.
+//
+// Uploaded rows read uploaded_at rather than status_changed_at: it is the
+// authoritative upload time and, unlike status_changed_at, it is known for
+// rows uploaded before that column existed. For a MarkedSynced row it is
+// the time of marking; the caller says so.
+func RowTime(u statedb.Upload) (unix float64, ok bool) {
+	if u.Status == "uploaded" {
+		return u.UploadedAt.Float64, u.UploadedAt.Valid
+	}
+	return u.StatusChangedAt.Float64, u.StatusChangedAt.Valid
+}
 
 // BrowseQuery is BrowseFiles' input -- a struct rather than a long
 // positional parameter list, since it was already growing one field at a
@@ -154,6 +173,17 @@ func sortRows(rows []statedb.Upload, key SortKey, desc bool) {
 		case SortKeyAttempts:
 			if a.AttemptCount != b.AttemptCount {
 				return lessDir(a.AttemptCount < b.AttemptCount, desc)
+			}
+		case SortKeyWhen:
+			// Unknown sorts last in both directions, as with Captured --
+			// a missing time must never pass for the oldest one.
+			at, aKnown := RowTime(a)
+			bt, bKnown := RowTime(b)
+			if aKnown != bKnown {
+				return aKnown
+			}
+			if aKnown && at != bt {
+				return lessDir(at < bt, desc)
 			}
 		case SortKeyCaptured:
 			// A row with no known capture date sorts last, in BOTH

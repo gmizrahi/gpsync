@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Browse shows when, and sorts by it.** A new column, headed by what it
+  means on each tab: **Uploaded**, **Queued**, **Last failed**, **Failed**,
+  **Ignored** or **Flagged**. Files recorded with *Mark as already synced*
+  show the time they were marked, tagged *marked synced*, so they never read
+  as uploads. Rows from before this release show "—" on every tab except
+  Uploaded, which has always recorded its time. `gpsync whatis` prints the
+  same moment as *Status since*. (#52)
+
 ### Fixed
 
 - **Dashboard buttons are consistent, and Browse is readable again.** Each
