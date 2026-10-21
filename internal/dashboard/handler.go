@@ -389,5 +389,5 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		handleOriginalsRaw(w, r, db)
 	})
 
-	return csrfMiddleware(sessionAuthMiddleware(mux, db, cfg))
+	return frameDenyMiddleware(csrfMiddleware(sessionAuthMiddleware(mux, db, cfg)))
 }

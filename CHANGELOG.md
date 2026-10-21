@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Another website can no longer embed the dashboard.** It sent nothing
+  forbidding it, so a page you visited could load it in an invisible frame and
+  line a decoy button up over a real one -- Forget, Restore, Sync this folder
+  now (clickjacking). The cross-site check didn't stop it, since a click
+  inside the frame is a click on the dashboard's own page, and with login off
+  -- the default -- there was no cookie to withhold. Every response now
+  forbids framing. (#57)
 - **Dashboard buttons are consistent, and Browse is readable again.** Each
   Browse row's Re-check and Forget were two full-size buttons stacked on top
   of each other, doubling every row's height: the cell's layout class had
