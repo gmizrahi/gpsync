@@ -184,6 +184,9 @@ func generateSelfSigned(dir, certPath, keyPath string, hosts []string, now time.
 		return nil, err
 	}
 
+	// KeyUsage is DigitalSignature (signing the TLS handshake) and CertSign
+	// (the certificate is its own trust anchor) -- never KeyEncipherment,
+	// which is RSA key transport and meaningless for this ECDSA key (#61).
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: "GPhotos Sync dashboard"},
@@ -191,7 +194,7 @@ func generateSelfSigned(dir, certPath, keyPath string, hosts []string, now time.
 		// browser cannot make a just-written certificate look not-yet-valid.
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(tlsCertValidity),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		// Self-signed and self-issued: to trust this at all the user must

@@ -1,7 +1,10 @@
 package dashboard
 
 import (
+	"crypto/tls"
 	"crypto/x509"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -324,5 +327,76 @@ func TestGeneratedCertificate_CanBeATrustAnchor(t *testing.T) {
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}); err != nil {
 		t.Errorf("certificate does not verify against itself as a root: %v", err)
+	}
+}
+
+// Issue #61. KeyEncipherment means "this key encrypts a session key", which
+// only an RSA key can do; the generated key is ECDSA P-256. Go's own
+// crypto/tls/generate_cert.go: "Only RSA subject keys should have the
+// KeyEncipherment KeyUsage bits set." Browsers tolerate the stray bit today,
+// but stricter TLS clients and certificate linters reject it.
+func TestEnsureTLSFiles_ECDSAKeyHasNoKeyEncipherment(t *testing.T) {
+	got, err := EnsureTLSFiles(t.TempDir(), "", "", testHosts(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := loadLeaf(got.CertPath, got.KeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaf.PublicKeyAlgorithm != x509.ECDSA {
+		t.Fatalf("PublicKeyAlgorithm = %v, want ECDSA -- this test is about an ECDSA key", leaf.PublicKeyAlgorithm)
+	}
+	if leaf.KeyUsage&x509.KeyUsageKeyEncipherment != 0 {
+		t.Error("KeyUsage includes KeyEncipherment, which is meaningless for an ECDSA key")
+	}
+	// What the certificate does need: to sign the TLS handshake, and --
+	// being its own trust anchor -- to have signed itself.
+	if leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		t.Error("KeyUsage lacks DigitalSignature, which an ECDSA server certificate needs for the handshake")
+	}
+	if leaf.KeyUsage&x509.KeyUsageCertSign == 0 || !leaf.IsCA {
+		t.Errorf("KeyUsage CertSign = %v, IsCA = %v; a self-signed certificate is its own trust anchor", leaf.KeyUsage&x509.KeyUsageCertSign != 0, leaf.IsCA)
+	}
+}
+
+// The pair has to actually SERVE, not just parse: dropping a KeyUsage bit is
+// exactly the kind of change that can leave a certificate loadable and
+// unusable. A real handshake, with a client that trusts only this
+// certificate, over both TLS versions a browser may negotiate.
+func TestEnsureTLSFiles_GeneratedPairCompletesARealHandshake(t *testing.T) {
+	got, err := EnsureTLSFiles(t.TempDir(), "", "", testHosts(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := tls.LoadX509KeyPair(got.CertPath, got.KeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := loadLeaf(got.CertPath, got.KeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{pair}}
+	srv.StartTLS()
+	defer srv.Close()
+
+	roots := x509.NewCertPool()
+	roots.AddCert(leaf)
+	for _, v := range []uint16{tls.VersionTLS13, tls.VersionTLS12} {
+		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs: roots, MinVersion: v, MaxVersion: v,
+		}}}
+		resp, err := client.Get(srv.URL) // https://127.0.0.1:port -- a host the certificate covers
+		if err != nil {
+			t.Fatalf("%s handshake with the generated certificate: %v", tls.VersionName(v), err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Errorf("%s: status %d", tls.VersionName(v), resp.StatusCode)
+		}
 	}
 }
