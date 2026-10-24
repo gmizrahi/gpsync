@@ -280,11 +280,14 @@ func Restore(archivePath string) (RestoreResult, error) {
 		return RestoreResult{}, fmt.Errorf("saving a safety copy of the current state before restoring (nothing was changed): %w", err)
 	}
 
-	// Stage every entry beside its final location, then commit.
-	staged := make(map[string]string, len(entries)) // tmp path -> final path
+	// Stage every entry beside its final location, then commit. Staged
+	// through fsperm, so each file is owner-only before a byte of it is
+	// written, on every OS (issue #60: on Windows a restore used to leave
+	// every restored file, credentials included, with its directory's ACL).
+	var staged []string // final paths, each with a staging file beside it
 	cleanupStaged := func() {
-		for tmp := range staged {
-			os.Remove(tmp)
+		for _, dest := range staged {
+			os.Remove(fsperm.StagingPath(dest))
 		}
 	}
 	var restored []string
@@ -294,18 +297,16 @@ func Restore(archivePath string) (RestoreResult, error) {
 			cleanupStaged()
 			return RestoreResult{PreRestoreDir: preRestoreDir}, fmt.Errorf("refusing to restore %q -- nothing was changed: %w", f.Name, err)
 		}
-		tmpPath := destPath + ".tmp"
-		if err := extractFile(f, tmpPath); err != nil {
+		if err := extractFile(f, destPath); err != nil {
 			cleanupStaged()
-			os.Remove(tmpPath)
 			return RestoreResult{PreRestoreDir: preRestoreDir}, fmt.Errorf("restoring %s -- nothing was changed, and a pre-restore safety copy is at %s: %w", f.Name, preRestoreDir, err)
 		}
-		staged[tmpPath] = destPath
+		staged = append(staged, destPath)
 		restored = append(restored, f.Name)
 	}
 
-	for tmpPath, destPath := range staged {
-		if err := os.Rename(tmpPath, destPath); err != nil {
+	for _, destPath := range staged {
+		if err := fsperm.CommitStaging(destPath); err != nil {
 			return RestoreResult{PreRestoreDir: preRestoreDir}, fmt.Errorf("putting restored %s into place (the restore is now PARTIAL -- the pre-restore safety copy at %s has the previous state): %w", filepath.Base(destPath), preRestoreDir, err)
 		}
 	}
@@ -350,17 +351,31 @@ func snapshotRaw(destDir string) error {
 // nothing and leaves no gap to get the name list wrong.
 const filePerm = 0o600
 
+// copyFile writes one file of the pre-restore safety copy: a raw copy of
+// token.json and client_secret.json among them, next to the archive.
+//
+// Created fresh (O_EXCL -- the directory is new, so an existing file means
+// something else is writing there, and overwriting it could destroy an
+// earlier safety copy) and restricted to the owner while still empty. On
+// Windows that restriction used to be missing entirely, so the copies
+// inherited the backup folder's ACL (issue #60). The folder is one the user
+// chose, often a cloud drive with no ACLs at all, so ErrUnsupported is
+// tolerated here as it is for the archive itself -- whose creation already
+// told the user that folder cannot be locked down.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, filePerm)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, filePerm)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
+	if err := restrictToOwner(dst); err != nil && !errors.Is(err, fsperm.ErrUnsupported) {
+		return err
+	}
 	_, err = io.Copy(out, in)
 	return err
 }
@@ -406,11 +421,17 @@ func extractFile(f *zip.File, destPath string) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
 		return err
 	}
-	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, filePerm)
+	// Into destPath's staging file, created owner-only and empty; the caller
+	// commits it once every entry has been staged.
+	out, err := fsperm.CreateStaging(destPath)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	fail := func(err error) error {
+		out.Close()
+		os.Remove(fsperm.StagingPath(destPath))
+		return err
+	}
 	// Cap the copy: a zip header's declared size is attacker-controlled, so
 	// an archive can claim to hold a few kilobytes and decompress into
 	// gigabytes ("zip bomb"), filling the disk during what looks like a
@@ -420,14 +441,18 @@ func extractFile(f *zip.File, destPath string) error {
 	limited := io.LimitReader(rc, maxRestoredFileSize+1)
 	written, err := io.Copy(out, limited)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	if written > maxRestoredFileSize {
-		return fmt.Errorf("entry %q expands past the %s restore limit; refusing to continue",
-			f.Name, units.Bytes(maxRestoredFileSize))
+		return fail(fmt.Errorf("entry %q expands past the %s restore limit; refusing to continue",
+			f.Name, units.Bytes(maxRestoredFileSize)))
 	}
-	// An existing file keeps its old mode through O_CREATE, so set it
-	// explicitly -- a restore must not leave a credential file at whatever
-	// looser mode happened to be there before.
-	return os.Chmod(destPath, filePerm)
+	if err := out.Sync(); err != nil {
+		return fail(err)
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(fsperm.StagingPath(destPath))
+		return err
+	}
+	return nil
 }

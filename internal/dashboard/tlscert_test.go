@@ -3,6 +3,7 @@ package dashboard
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"github.com/gmizrahi/gpsync/internal/fsperm/fspermtest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -399,4 +400,23 @@ func TestEnsureTLSFiles_GeneratedPairCompletesARealHandshake(t *testing.T) {
 			t.Errorf("%s: status %d", tls.VersionName(v), resp.StatusCode)
 		}
 	}
+}
+
+// Issue #60. The private key was staged with os.WriteFile, whose mode
+// applies only to a file it creates: a stale, looser dashboard_key.pem.tmp
+// passed its mode to the key through the rename.
+func TestEnsureTLSFiles_StaleLooseStagingKey_EndsOwnerOnly(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, TLSKeyFileName+".tmp")
+	if err := os.WriteFile(stale, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := EnsureTLSFiles(dir, "", "", testHosts(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fspermtest.AssertOwnerOnly(t, got.KeyPath)
 }

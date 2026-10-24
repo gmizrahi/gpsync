@@ -2,6 +2,7 @@ package backup
 
 import (
 	"archive/zip"
+	"github.com/gmizrahi/gpsync/internal/fsperm/fspermtest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -358,16 +359,17 @@ func TestRestore_InvalidArchiveLeavesLiveStateCompletelyUntouched(t *testing.T) 
 	}
 }
 
-// TestRestore_WritesCredentialsAt0600 proves restored files keep the
-// restrictive mode `gpsync setup`/`gpsync import-rclone` originally wrote them
-// with. extractFile used 0o644, so every restore silently loosened
-// client_secret.json/token.json -- and copyFile's os.Create did the same to
-// the pre-restore safety copy, which additionally lived in a 0755 directory
-// right next to the (often cloud-synced) archive.
-func TestRestore_WritesCredentialsAt0600(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX file modes are not meaningful on Windows")
-	}
+// TestRestore_WritesCredentialsOwnerOnly proves restored files are
+// readable by the current account only, as `gpsync setup`/`gpsync
+// import-rclone` originally wrote them. extractFile used 0o644, so every
+// restore silently loosened client_secret.json/token.json -- and copyFile's
+// os.Create did the same to the pre-restore safety copy, which additionally
+// lived in a 0755 directory right next to the (often cloud-synced) archive.
+//
+// It used to skip Windows, where mode bits mean nothing -- so on the
+// platform gpsync primarily targets, nothing checked a restore at all
+// (issue #60). fspermtest checks the DACL there.
+func TestRestore_WritesCredentialsOwnerOnly(t *testing.T) {
 	db := openTestDB(t)
 	if err := db.EnsurePending("hash-a", 1, "image/jpeg", "/a.jpg", nil); err != nil {
 		t.Fatal(err)
@@ -392,6 +394,15 @@ func TestRestore_WritesCredentialsAt0600(t *testing.T) {
 	if err := os.Chmod(filepath.Join(statedb.StateDir, "token.json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// And leave a loose staging file where the restore stages token.json: a
+	// leftover from an interrupted restore must not lend it its mode.
+	stale := filepath.Join(statedb.StateDir, "token.json.tmp")
+	if err := os.WriteFile(stale, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	restoreResult, err := Restore(result.Path)
 	if err != nil {
@@ -399,27 +410,15 @@ func TestRestore_WritesCredentialsAt0600(t *testing.T) {
 	}
 
 	for _, name := range restoreResult.Files {
-		info, err := os.Stat(filepath.Join(statedb.StateDir, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if perm := info.Mode().Perm(); perm != 0o600 {
-			t.Errorf("restored %s mode = %o, want 600", name, perm)
-		}
-		preInfo, err := os.Stat(filepath.Join(restoreResult.PreRestoreDir, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if perm := preInfo.Mode().Perm(); perm != 0o600 {
-			t.Errorf("pre-restore copy of %s mode = %o, want 600", name, perm)
-		}
+		fspermtest.AssertOwnerOnly(t, filepath.Join(statedb.StateDir, name))
+		fspermtest.AssertOwnerOnly(t, filepath.Join(restoreResult.PreRestoreDir, name))
 	}
 
 	dirInfo, err := os.Stat(restoreResult.PreRestoreDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
+	if perm := dirInfo.Mode().Perm(); runtime.GOOS != "windows" && perm != 0o700 {
 		t.Errorf("pre-restore directory mode = %o, want 700 -- it holds a raw copy of the OAuth credentials, next to a often cloud-synced archive", perm)
 	}
 

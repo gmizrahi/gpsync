@@ -59,7 +59,7 @@ func RestrictToOwner(path string) error {
 		},
 	}}, nil)
 	if err != nil {
-		return fmt.Errorf("building the credential ACL: %w", err)
+		return fmt.Errorf("building the owner-only ACL: %w", err)
 	}
 
 	if err := windows.SetNamedSecurityInfo(
