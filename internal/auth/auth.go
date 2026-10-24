@@ -171,12 +171,10 @@ func SaveClientSecret(cs ClientSecret) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(ClientSecretPath, data, 0o600); err != nil {
-		return err
-	}
-	// Windows ignores the mode above; keep SECURITY.md's owner-only promise
-	// with an ACL there. No-op on POSIX, where 0600 is already the answer.
-	return fsperm.RestrictToOwner(ClientSecretPath)
+	// Owner-only on every OS, and atomic: a client_secret.json that already
+	// existed used to keep its own, possibly looser, mode through
+	// os.WriteFile (issue #60).
+	return fsperm.WriteFileOwnerOnly(ClientSecretPath, data)
 }
 
 func loadToken() *oauth2.Token {
@@ -191,14 +189,13 @@ func loadToken() *oauth2.Token {
 	return &tok
 }
 
-// saveToken writes token.json atomically: serialize to a sibling ".tmp"
-// file, then rename it over the real path. os.WriteFile alone opens the
-// live token.json with O_TRUNC and streams into it, so any failure (or any
-// second writer) mid-write leaves a truncated/interleaved file behind --
+// saveToken writes token.json atomically, through a staging file renamed
+// over the real path (fsperm.WriteFileOwnerOnly). os.WriteFile alone opens
+// the live token.json with O_TRUNC and streams into it, so any failure (or
+// any second writer) mid-write leaves a truncated/interleaved file behind --
 // and an unparseable token.json is indistinguishable from "never
 // authorized", silently dropping the next run into the interactive browser
-// consent flow. Rename is atomic on both POSIX and Windows for same-volume
-// paths, which this always is (the tmp file is in the same directory).
+// consent flow.
 func saveToken(tok *oauth2.Token) error {
 	if err := os.MkdirAll(filepath.Dir(TokenPath), 0o700); err != nil {
 		return err
@@ -209,17 +206,7 @@ func saveToken(tok *oauth2.Token) error {
 	if err != nil {
 		return err
 	}
-	tmpPath := TokenPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, TokenPath); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	// Applied AFTER the rename: the ACL belongs on the file that survives,
-	// and a rename does not carry the staging file's DACL to the target.
-	return fsperm.RestrictToOwner(TokenPath)
+	return fsperm.WriteFileOwnerOnly(TokenPath, data)
 }
 
 // persistingTokenSource writes the token back to disk whenever the

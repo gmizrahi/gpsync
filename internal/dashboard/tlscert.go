@@ -222,7 +222,7 @@ func generateSelfSigned(dir, certPath, keyPath string, hosts []string, now time.
 	// The key is written first and owner-only. If the process dies between
 	// the two writes, the next start finds a pair that will not load and
 	// regenerates both -- which is why loadLeaf failing is not fatal above.
-	if err := writeOwnerOnly(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})); err != nil {
+	if err := fsperm.WriteFileOwnerOnly(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})); err != nil {
 		return nil, err
 	}
 	// The certificate is public by design: it is what the browser is shown.
@@ -231,22 +231,6 @@ func generateSelfSigned(dir, certPath, keyPath string, hosts []string, now time.
 	}
 
 	return x509.ParseCertificate(der)
-}
-
-// writeOwnerOnly stages, renames, then restricts -- the same order
-// auth.saveToken uses, and for the same reason: a rename does not carry the
-// staging file's DACL to the target, so restricting before the rename would
-// leave the surviving file readable by everyone on Windows.
-func writeOwnerOnly(path string, data []byte) error {
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return fsperm.RestrictToOwner(path)
 }
 
 // DefaultCertHosts is every name and address the dashboard is plausibly

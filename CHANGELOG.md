@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Secrets are owner-only on every write, on every OS.** gpsync wrote
+  `token.json`, `client_secret.json`, the dashboard's TLS key, restored files
+  and the pre-restore safety copy in five different ways, and three leaked:
+  on Linux and macOS a leftover staging file, or an existing
+  `client_secret.json`, could pass its looser permissions to the secret; on
+  Windows a restore left every file it wrote -- credentials included --
+  readable through the folder's inherited permissions. All of them now go
+  through one helper that creates the file owner-only before writing a byte.
+  (#60)
 - **The dashboard's self-signed certificate no longer claims a key usage its
   key cannot have.** It is an ECDSA key, but the certificate also declared
   *KeyEncipherment*, which only RSA keys can do. Browsers ignore the stray
