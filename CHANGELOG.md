@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1]
+
+Two security fixes. If you restore backups on Windows, the first one
+matters: a restore left the files it wrote -- your Google credentials among
+them -- with the folder's inherited permissions instead of owner-only ones.
+In the default folder under your user profile that means administrator
+accounts could read them; in a folder with looser permissions, other
+accounts too.
+
 ### Fixed
 
 - **Secrets are owner-only on every write, on every OS.** gpsync wrote
@@ -17,13 +26,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Windows a restore left every file it wrote -- credentials included --
   readable through the folder's inherited permissions. All of them now go
   through one helper that creates the file owner-only before writing a byte.
-  (#60)
+  (#60, #64)
 - **The dashboard's self-signed certificate no longer claims a key usage its
   key cannot have.** It is an ECDSA key, but the certificate also declared
   *KeyEncipherment*, which only RSA keys can do. Browsers ignore the stray
   bit; stricter TLS clients and certificate linters reject it. A certificate
   you already trust keeps working -- the fix applies the next time gpsync
-  regenerates one. (#61)
+  regenerates one. (#61, #63)
+
+### Changed
+
+- **The source pins Go 1.27.3** instead of 1.26.6, which has three
+  standard-library vulnerabilities reachable from gpsync. Released binaries
+  were already built with 1.27.3; this covers building from source. (#62)
 
 ## [0.4.0]
 
@@ -331,7 +346,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/gmizrahi/gpsync/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/gmizrahi/gpsync/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/gmizrahi/gpsync/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/gmizrahi/gpsync/compare/v0.3.1...v0.3.2
