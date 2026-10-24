@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The dashboard's self-signed certificate no longer claims a key usage its
+  key cannot have.** It is an ECDSA key, but the certificate also declared
+  *KeyEncipherment*, which only RSA keys can do. Browsers ignore the stray
+  bit; stricter TLS clients and certificate linters reject it. A certificate
+  you already trust keeps working -- the fix applies the next time gpsync
+  regenerates one. (#61)
+
 ## [0.4.0]
 
 The dashboard now answers *when* and *which*: Browse shows when each file
