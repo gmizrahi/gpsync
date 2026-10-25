@@ -382,6 +382,9 @@
   .btn-secondary:hover, .btn-sm:hover { box-shadow: inset 0 0 0 1px var(--info); color: var(--info); opacity: 1; text-decoration: none; }
   .btn-sm { padding: 0.3rem 0.75rem; font-size: 0.8rem; }
   .btn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  /* A just-created API token, shown once: breaks anywhere so it never
+     overflows, and one click selects all of it for copying. */
+  .token-reveal { display: inline-block; margin-top: 0.4rem; word-break: break-all; user-select: all; }
   /* Its own rule, not added to the selector lists above: a browser that
      does not know ::file-selector-button drops the WHOLE rule it appears
      in, which would take .btn-sm down with it. */

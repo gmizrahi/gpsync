@@ -34,6 +34,7 @@ password hash.
 | `dashboard_listen_addr` | text | Address the dashboard binds to; non-loopback requires login |
 | `dashboard_port` | number | Dashboard port (0 picks a free one) |
 | `dashboard_auth_enabled` | true/false | Require a username and password for the dashboard |
+| `api_token_lifetime` | text | Lifetime of a new [API token](api.md) created without `--expires`: like `90d`, `12h`, or `never` (default `90d`) |
 | `dashboard_auth_user` | text | Dashboard username |
 | `dashboard_auth_pass_hash` | text | bcrypt hash of the dashboard password; never the password itself |
 | `dashboard_tls_mode` | text | `off`, `self-signed` or `files` |

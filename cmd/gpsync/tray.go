@@ -121,47 +121,47 @@ func trayQuitCmd() *cobra.Command {
 				fmt.Println("gpsync-tray does not appear to have run yet (no dashboard port recorded) -- nothing to quit.")
 				return nil
 			}
-			url := trayDashboardBase(cfg) + "/api/quit"
-			req, err := http.NewRequest(http.MethodPost, url, nil)
+			// Mint first, and separately: a ledger that can't be opened, or a
+			// token that can't be minted, is an error worth reporting -- only
+			// a refused CONNECTION means the tray is not running.
+			db, err := statedb.Open()
 			if err != nil {
 				return err
 			}
-			// Authenticate by minting our own session row rather than by
-			// asking for the dashboard password. Writing to state.sqlite
-			// is a STRICTLY STRONGER credential than that password --
-			// anyone who can do it could also rewrite the stored hash --
-			// so this grants nothing that local filesystem access didn't
-			// already grant, and it keeps a password off the command line
-			// and out of shell history. Best-effort: with auth switched
-			// off the endpoint takes the request either way, so a failure
-			// to mint one is not worth aborting over.
-			if cfg.DashboardAuthEnabled {
-				if token, terr := trayQuitSession(); terr != nil {
-					fmt.Printf("  %s could not create a dashboard session (%v) -- trying without one\n", colWarn("note:"), terr)
-				} else {
-					req.AddCookie(&http.Cookie{Name: "gpsync_session", Value: token})
-				}
+			token, cleanup, err := engine.MintEphemeralAPIToken(db, []string{engine.ScopeControl}, 2*time.Minute, time.Now())
+			if err != nil {
+				db.Close()
+				return fmt.Errorf("minting a token for this command: %w", err)
 			}
-			// A generous timeout: the response is written BEFORE the
-			// shutdown starts (see the handler), so this is only waiting
-			// on the request itself, not on uploads draining.
-			client := &http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Do(req)
+			defer db.Close()
+			defer cleanup()
+
+			resp, err := quitViaAPIv1(cfg, token)
 			if err != nil {
 				fmt.Println("gpsync-tray is not running -- nothing to quit.")
 				return nil
+			}
+			if resp.StatusCode == http.StatusNotFound {
+				// The running tray predates /api/v1 -- the usual case
+				// mid-upgrade, with this new CLI and the old tray still
+				// running. Its /api/quit takes a minted session instead.
+				resp.Body.Close()
+				if resp, err = quitViaLegacySession(cfg); err != nil {
+					fmt.Println("gpsync-tray is not running -- nothing to quit.")
+					return nil
+				}
 			}
 			defer resp.Body.Close()
 			switch resp.StatusCode {
 			case http.StatusAccepted:
 				fmt.Println("gpsync-tray is finishing in-flight uploads, then exiting. Watch for the tray icon to disappear.")
 				return nil
-			case http.StatusUnauthorized:
-				return fmt.Errorf("the dashboard rejected this session -- use the tray menu's Quit instead")
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return fmt.Errorf("the dashboard rejected this request -- use the tray menu's Quit instead")
 			case http.StatusNotFound:
-				// The running tray predates this endpoint. Unavoidable
-				// exactly once, since the build that answers /api/quit is
-				// the one that can't be installed until the old one exits.
+				// Older than the legacy endpoint too. Unavoidable exactly
+				// once, since the build that answers /api/quit is the one
+				// that can't be installed until the old one exits.
 				return fmt.Errorf("the running gpsync-tray is older than this command -- quit it from the tray menu once, " +
 					"and every version after that can be replaced with this")
 			default:
@@ -170,4 +170,48 @@ func trayQuitCmd() *cobra.Command {
 			}
 		},
 	}
+}
+
+// trayQuitTimeout is generous: the tray answers BEFORE it starts shutting
+// down (see serveQuit), so this waits only on the request itself, never on
+// uploads draining.
+const trayQuitTimeout = 5 * time.Second
+
+// quitViaAPIv1 asks the tray to quit through the token API, with a token
+// the command mints for itself (issue #67): valid for two minutes, scoped
+// to control and nothing else, and deleted when the command ends. An error
+// here is a failed request -- the tray isn't there to answer.
+//
+// No password, no login, no configuration: writing state.sqlite is a
+// STRICTLY STRONGER credential than any token or dashboard password --
+// anyone who can do it could mint a token or rewrite the stored hash
+// themselves -- so this grants nothing that local filesystem access didn't
+// already grant, and it keeps every secret off the command line and out of
+// shell history.
+func quitViaAPIv1(cfg config.Config, token string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, trayDashboardBase(cfg)+"/api/v1/control/quit", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return (&http.Client{Timeout: trayQuitTimeout}).Do(req)
+}
+
+// quitViaLegacySession is the pre-#67 route, for a running tray that has no
+// /api/v1 yet: /api/quit, authenticated -- when the dashboard has login on --
+// with a short session minted the same way. Kept so a new CLI can still stop
+// an old tray mid-upgrade.
+func quitViaLegacySession(cfg config.Config) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, trayDashboardBase(cfg)+"/api/quit", nil)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.DashboardAuthEnabled {
+		if token, terr := trayQuitSession(); terr != nil {
+			fmt.Printf("  %s could not create a dashboard session (%v) -- trying without one\n", colWarn("note:"), terr)
+		} else {
+			req.AddCookie(&http.Cookie{Name: "gpsync_session", Value: token})
+		}
+	}
+	return (&http.Client{Timeout: trayQuitTimeout}).Do(req)
 }

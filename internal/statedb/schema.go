@@ -148,6 +148,28 @@ CREATE TABLE IF NOT EXISTS throttle_events (
 -- one, but either way this table is the single source of truth for
 -- whether a session cookie is still good, independent of the cookie's own
 -- client-side Max-Age.
+-- api_tokens holds bearer tokens for /api/v1 (issue #67). Only the SHA-256
+-- of a token is stored, never the token. A token that has been rotated keeps
+-- its predecessor's hash in prev_hash until prev_valid_until, so a client
+-- that lost the rotate response can still retry with the token it has.
+-- ephemeral marks the short-lived tokens gpsync's own CLI mints for a single
+-- command: hidden from listings, swept once expired.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    name TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    scopes TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL,
+    -- lifetime_seconds is the lifetime the token was created with, which a
+    -- rotation renews; NULL: never expires.
+    lifetime_seconds REAL,
+    last_used_at REAL,
+    rotated_at REAL,
+    prev_hash TEXT UNIQUE,
+    prev_valid_until REAL,
+    ephemeral INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS dashboard_sessions (
     token TEXT PRIMARY KEY,
     created_at REAL NOT NULL,

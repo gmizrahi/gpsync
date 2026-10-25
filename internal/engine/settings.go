@@ -198,6 +198,18 @@ func ApplySettingsForm(current config.Config, values url.Values) (config.Config,
 	// Dashboard TLS. An unrecognised mode is named rather than quietly
 	// treated as "off" -- serving plain HTTP to someone who believes they
 	// switched HTTPS on is the worst outcome available here.
+	// Applied only when the form sends it: Settings once lacked the TLS
+	// inputs while this function parsed them, and every save silently
+	// switched HTTPS off. A missing field means "not on this form", not
+	// "empty".
+	if values.Has("api_token_lifetime") {
+		lifetime := strings.ToLower(strings.TrimSpace(values.Get("api_token_lifetime")))
+		if _, _, err := ParseAPITokenLifetime(lifetime); err != nil {
+			return current, err
+		}
+		cfg.APITokenLifetime = lifetime
+	}
+
 	tlsMode := strings.TrimSpace(values.Get("dashboard_tls_mode"))
 	if tlsMode == "" {
 		tlsMode = config.TLSModeOff

@@ -399,13 +399,37 @@ gpsync restore <backup-file>
 | `--yes` | Don't ask for confirmation |
 
 
+## API
+
+Tokens for programs on this machine that call gpsync's HTTP API. See [api.md](api.md).
+
+### `gpsync token create`
+
+Create an API token and print it, once.
+
+Prints the new token -- and only the token -- on stdout, so it can go straight into a file: `gpsync token create --name photos-app > token.txt`. Without `--expires` the token lives for `api_token_lifetime` (90d unless changed in Settings).
+
+| Flag | Meaning |
+|------|---------|
+| `--name string` | A name for the token, unique; used to list and revoke it |
+| `--expires string` | Lifetime, like `90d`, `12h` or `never` (default: the `api_token_lifetime` setting) |
+| `--scope string` | What the token may do: `read`, `control`, or both (`read,control`) (default `read`) |
+
+### `gpsync token list`
+
+List API tokens: name, scopes, created, last used, expiry. Never the tokens themselves.
+
+### `gpsync token revoke`
+
+Revoke an API token by name. Anything still using it is refused at once.
+
 ## Other
 
 ### `gpsync tray-quit`
 
 Ask gpsync-tray to finish current uploads and exit.
 
-Asks a running gpsync-tray to exit gracefully: uploads in progress finish and nothing new starts. Use it before replacing gpsync-tray.exe.
+Asks a running gpsync-tray to exit gracefully: uploads in progress finish and nothing new starts. Use it before replacing gpsync-tray.exe. Needs no password: it authenticates with a short-lived API token it mints for itself and deletes afterwards, and falls back to the older route when the running tray predates the API.
 
 Exits with 0 if the tray was asked to quit or was not running.
 

@@ -95,6 +95,7 @@ func rootCmd() *cobra.Command {
 		fixDatesCmd(),
 		doctorCmd(),
 		trayQuitCmd(),
+		tokenCmd(),
 		verifyCmd(),
 		reuploadCmd(),
 		cleanOriginalsCmd(),

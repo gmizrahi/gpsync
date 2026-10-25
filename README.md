@@ -124,6 +124,7 @@ and `gpsync setup` can import an existing rclone remote instead.
 | `mark-synced`, `quality`, `reupload`, `fix-dates` | Correct what the ledger records |
 | `backup`, `restore` | Snapshot and restore gpsync's own data |
 | `quota`, `throttle-log` | API usage and throttling history |
+| `token` | API tokens for programs on this machine ([HTTP API](docs/api.md)) |
 
 Every command has `--help` with examples. Full reference:
 [docs/commands.md](docs/commands.md).
@@ -134,6 +135,7 @@ Every command has `--help` with examples. Full reference:
 - [Configuration](docs/configuration.md) — every `config.toml` setting
 - [Commands](docs/commands.md) — full command reference
 - [Dashboard](docs/dashboard.md) — the tray app and web UI
+- [HTTP API](docs/api.md) — tokens and endpoints for local programs
 - [Troubleshooting](docs/troubleshooting.md) — throttling, quota, stuck files
 - [Limitations](docs/limitations.md) — what the Google Photos API cannot do
 - [Security](SECURITY.md) · [Privacy](PRIVACY.md)
