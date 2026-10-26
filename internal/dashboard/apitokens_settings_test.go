@@ -1,8 +1,12 @@
 package dashboard
 
 import (
+	"bytes"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -79,3 +83,46 @@ func TestSettings_CrossSiteTokenCreateIsRefused(t *testing.T) {
 }
 
 func timeNow() time.Time { return time.Now() }
+
+// CodeQL go/log-injection on PR #69. Settings accepts only the expiry
+// options it offers -- matched exactly -- so a crafted value can neither
+// become a lifetime nor reach the log. "\n90d" used to parse as 90 days
+// (the parser trims) and carry its newline into tray.log; "12h" is a valid
+// lifetime, but not one Settings offers.
+func TestSettings_APITokenExpiryMustBeAnOfferedChoice(t *testing.T) {
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	db := openTestDB(t)
+	srv := newTestServer(t, db, newFakeController(), Options{})
+	c := newTestClient(t)
+	for i, choice := range []string{"\n90d", "90d\n2026/01/01 forged line", "12h", "", " 30d"} {
+		body := url.Values{"token_name": {fmt.Sprintf("t%d", i)}, "token_expires": {choice}}.Encode()
+		resp := mustPostForm(t, c, srv.URL+"/settings/api-tokens", srv.URL, body)
+		page, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || strings.Contains(string(page), engine.APITokenPrefix) {
+			t.Errorf("expiry %q: status %d, token issued %v; want 400 and no token", choice, resp.StatusCode, strings.Contains(string(page), engine.APITokenPrefix))
+		}
+	}
+	if list, _ := db.ListAPITokens(); len(list) != 0 {
+		t.Errorf("%d token(s) created from crafted expiry values", len(list))
+	}
+	if strings.Contains(buf.String(), "forged line") {
+		t.Errorf("a submitted value reached the log:\n%s", buf.String())
+	}
+	// The offered choices still work.
+	resp := mustPostForm(t, c, srv.URL+"/settings/api-tokens", srv.URL, "token_name=ok&token_expires=365d")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("an offered choice was refused: %d", resp.StatusCode)
+	}
+}
+
+func TestLogSafe_NeutralizesLineBreaks(t *testing.T) {
+	if got := logSafe("a\nb\r\nc"); strings.ContainsAny(got, "\r\n") || got != `a\nb\r\nc` {
+		t.Errorf("logSafe = %q", got)
+	}
+}

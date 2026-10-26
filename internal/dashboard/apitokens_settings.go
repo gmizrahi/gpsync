@@ -35,9 +35,21 @@ type apiTokenNotice struct {
 	Error    string
 }
 
-// apiTokenExpiryChoices are the create form's expiry options. "default"
-// takes the api_token_lifetime setting.
+// apiTokenExpiryChoices are the create form's expiry options, and the only
+// values the create handler accepts from it. "default" takes the
+// api_token_lifetime setting. The CLI accepts any lifetime; Settings accepts
+// only what it offers.
 var apiTokenExpiryChoices = []string{"default", "30d", "90d", "365d", "never"}
+
+// logSafe neutralizes line breaks in a request-derived value before it is
+// logged, so a submitted value can't forge a log line. Values the server
+// has already validated pass through it too: one rule for everything a
+// request supplies, rather than a judgement per call site.
+func logSafe(s string) string {
+	return logLineBreaks.Replace(s)
+}
+
+var logLineBreaks = strings.NewReplacer("\n", `\n`, "\r", `\r`)
 
 func apiTokenRows(db *statedb.DB, now time.Time) ([]apiTokenRow, error) {
 	tokens, err := db.ListAPITokens()
@@ -69,18 +81,36 @@ func handleAPITokenCreate(w http.ResponseWriter, r *http.Request, db *statedb.DB
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("token_name"))
-	choice := r.PostForm.Get("token_expires")
-	lifetimeText := cfg.APITokenLifetime
-	if choice != "default" && choice != "" {
-		lifetimeText = choice
+	// Only the form's own options -- matched exactly, and from here on the
+	// matched CONSTANT is used, never the submitted string. The lifetime
+	// parser trims its input, so before this a value like "\n90d" parsed as
+	// 90 days and carried its newline into the log (CodeQL go/log-injection).
+	choice := ""
+	for _, c := range apiTokenExpiryChoices {
+		if r.PostForm.Get("token_expires") == c {
+			choice = c
+		}
 	}
 	notice := apiTokenNotice{}
-	lifetime, expires, err := engine.ParseAPITokenLifetime(lifetimeText)
+	var err error
+	lifetimeText := cfg.APITokenLifetime
+	switch choice {
+	case "":
+		err = errors.New("choose one of the offered expiry options")
+	case "default":
+	default:
+		lifetimeText = choice
+	}
+	var lifetime time.Duration
+	var expires bool
+	if err == nil {
+		lifetime, expires, err = engine.ParseAPITokenLifetime(lifetimeText)
+	}
 	if err == nil {
 		var token string
 		token, err = engine.CreateAPIToken(db, name, []string{engine.ScopeRead}, lifetime, expires, time.Now())
 		if err == nil {
-			log.Printf("api: token %q created from the dashboard (scope read, expires %s)", name, lifetimeText)
+			log.Printf("api: token %q created from the dashboard (scope read, expires %s)", logSafe(name), logSafe(lifetimeText))
 			notice.NewName, notice.NewToken = name, token
 		}
 	}
@@ -116,7 +146,7 @@ func handleAPITokenRevoke(w http.ResponseWriter, r *http.Request, db *statedb.DB
 	if err := engine.RevokeAPIToken(db, name); err != nil {
 		v.Set("token_error", err.Error())
 	} else {
-		log.Printf("api: token %q revoked from the dashboard", name)
+		log.Printf("api: token %q revoked from the dashboard", logSafe(name))
 		v.Set("token_revoked", name)
 	}
 	http.Redirect(w, r, "/settings?"+v.Encode()+"#api-tokens", http.StatusSeeOther)

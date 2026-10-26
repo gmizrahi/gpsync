@@ -97,9 +97,9 @@ func apiV1Handler(db *statedb.DB, quit func()) http.Handler {
 				reason = "invalid, expired or revoked token"
 			}
 			if failures.locked(ip) {
-				log.Printf("api auth: %s from %s; further failures from there are refused for a while", reason, ip)
+				log.Printf("api auth: %s from %s; further failures from there are refused for a while", reason, logSafe(ip))
 			} else {
-				log.Printf("api auth: %s from %s", reason, ip)
+				log.Printf("api auth: %s from %s", reason, logSafe(ip))
 			}
 			w.Header().Set("WWW-Authenticate", `Bearer realm="gpsync"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
