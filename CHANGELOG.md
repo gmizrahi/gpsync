@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0]
+
+The media API now says where and when a photo was taken: its GPS position,
+its dimensions, the camera's own time zone, and where its date came from.
+Files in year-and-month folders such as `2024_05 Trip` are now dated to
+that month instead of January 1st.
+
+The first scan after upgrading takes longer than usual: it reads these
+details, once, for files gpsync already knew. Then run `gpsync fix-dates`
+once to correct files that were dated January 1st by a year-and-month
+folder.
+
 ### Added
 
 - **The media API reports where and when, more precisely.** Items now carry
@@ -16,14 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in that zone, instead of the EXIF time read as this PC's. Each field
   appears only when the file records it. Files already scanned get these on
   the next scan, which reads each one's EXIF once; that first scan takes
-  longer than usual. (#68)
+  longer than usual. (#68, #72)
 
 ### Fixed
 
 - **Year-and-month folders date their files to that month.** A file with no
   EXIF date in a folder such as `2024_05 Trip`, `2024-05` or `202405` was
   dated January 1st of that year; it's now the 1st of the month.
-  `gpsync fix-dates` corrects files already dated that way. (#73)
+  `gpsync fix-dates` corrects files already dated that way. (#73, #74)
 
 ## [0.5.0]
 
@@ -390,7 +402,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/gmizrahi/gpsync/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gmizrahi/gpsync/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/gmizrahi/gpsync/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/gmizrahi/gpsync/compare/v0.3.3...v0.4.0
