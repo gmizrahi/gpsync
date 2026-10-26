@@ -57,7 +57,22 @@ CREATE TABLE IF NOT EXISTS uploads (
     -- google_media_item_id) as suspect, which would have re-sent 15,276
     -- files / 251 GiB that were already originals. "gpsync did not
     -- upload this" and "this is low quality" are different facts.
-    remote_quality TEXT
+    remote_quality TEXT,
+    -- What a scan reads besides the hash (issue #68), each NULL where the
+    -- file doesn't record it -- never a made-up value. capture_source is
+    -- where captured_at came from: 'exif', 'path' or 'mtime', NULL if not
+    -- known (rows from before it was recorded whose time a backfill could
+    -- not match to a source, or one fix-dates changed). capture_offset is
+    -- the camera's own time-zone offset, like '+02:00'. width/height are as
+    -- displayed, EXIF orientation applied. metadata_read_at says the file
+    -- was read for these, so a backfill reads each row once.
+    capture_source TEXT,
+    capture_offset TEXT,
+    gps_lat REAL,
+    gps_lon REAL,
+    width INTEGER,
+    height INTEGER,
+    metadata_read_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status);
 -- Folder-prefix lookups (first_source_path LIKE 'C:\\Photos\\2024\\%') run for
@@ -290,6 +305,13 @@ func migrateUploadsVerified(conn *sql.DB) error {
 		"missing_checked_at":   `ALTER TABLE uploads ADD COLUMN missing_checked_at REAL`,
 		"missing_confirmed_at": `ALTER TABLE uploads ADD COLUMN missing_confirmed_at REAL`,
 		"status_changed_at":    `ALTER TABLE uploads ADD COLUMN status_changed_at REAL`,
+		"capture_source":       `ALTER TABLE uploads ADD COLUMN capture_source TEXT`,
+		"capture_offset":       `ALTER TABLE uploads ADD COLUMN capture_offset TEXT`,
+		"gps_lat":              `ALTER TABLE uploads ADD COLUMN gps_lat REAL`,
+		"gps_lon":              `ALTER TABLE uploads ADD COLUMN gps_lon REAL`,
+		"width":                `ALTER TABLE uploads ADD COLUMN width INTEGER`,
+		"height":               `ALTER TABLE uploads ADD COLUMN height INTEGER`,
+		"metadata_read_at":     `ALTER TABLE uploads ADD COLUMN metadata_read_at REAL`,
 	} {
 		if existing[col] {
 			continue

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The media API reports where and when, more precisely.** Items now carry
+  the photo's GPS position, its dimensions, the time-zone offset the camera
+  recorded, and where `captured_at` came from (EXIF, the path or the file's
+  date). When the camera recorded an offset, `captured_at` is that instant,
+  in that zone, instead of the EXIF time read as this PC's. Each field
+  appears only when the file records it. Files already scanned get these on
+  the next scan, which reads each one's EXIF once; that first scan takes
+  longer than usual. (#68)
+
 ## [0.5.0]
 
 A local HTTP API, so another program on this PC can show the photos gpsync

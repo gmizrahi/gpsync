@@ -362,12 +362,13 @@ func (db *DB) AllCaptureDates() ([]CaptureDateRow, error) {
 	return out, rows.Err()
 }
 
-// UpdateCapturedAt overwrites one row's captured_at -- used by `gpsync
-// fix-dates` to replace a value derived from an unreliable filesystem
-// mtime with one recovered from the file's own path. Nothing else about
-// the row (status, size, etc.) is touched.
-func (db *DB) UpdateCapturedAt(sha256 string, capturedAt float64) error {
-	_, err := db.conn.Exec(`UPDATE uploads SET captured_at=? WHERE sha256=?`, capturedAt, sha256)
+// UpdateCapturedAt overwrites one row's captured_at, and records where the
+// new value came from (capture_source) -- used by `gpsync fix-dates` to
+// replace a value derived from an unreliable filesystem mtime with one
+// recovered from the file's own path. Nothing else about the row (status,
+// size, etc.) is touched.
+func (db *DB) UpdateCapturedAt(sha256 string, capturedAt float64, source string) error {
+	_, err := db.conn.Exec(`UPDATE uploads SET captured_at=?, capture_source=? WHERE sha256=?`, capturedAt, nullIfEmpty(source), sha256)
 	return err
 }
 

@@ -18,12 +18,12 @@ type fixDatesSummary struct {
 // path (scanner.DateFromPath) and overwrites the stored value whenever
 // the two disagree on YEAR. It fixes per-year counts that came out wrong
 // because the stored date had drifted from the file's own path. Root
-// cause: scanner.captureDate falls back to the file's filesystem
+// cause: scanner.ReadMetadata falls back to the file's filesystem
 // MTIME whenever EXIF is missing/unreadable, and mtime can drift
 // arbitrarily far from the true capture date (a later backup/migration
 // touching an EXIF-less file long after it was actually taken). This
 // backfill is what fixes files that were already scanned BEFORE that
-// fallback ordering changed -- captureDate() itself now tries a
+// fallback ordering changed -- ReadMetadata() itself now tries a
 // path-derived date before mtime, but that only helps FUTURE scans; a
 // file already in the ledger keeps whatever captured_at it got on its
 // FIRST scan (EnsurePending is `ON CONFLICT DO NOTHING`) until something

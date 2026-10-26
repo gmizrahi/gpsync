@@ -270,3 +270,35 @@ func TestAPIv1Media_ThumbnailsGoToTheConfiguredFolder(t *testing.T) {
 		t.Error("a thumbnail was written into the source folder")
 	}
 }
+
+// Issue #68's fields: present when known, absent when not, and captured_at
+// in the camera's own zone when it recorded one.
+func TestAPIv1Media_MetadataFields(t *testing.T) {
+	f := newMediaFixture(t)
+	at := float64(time.Date(2024, 5, 1, 7, 30, 0, 0, time.UTC).Unix())
+	lat, lon, w, h := 48.8584, 2.2945, 4000, 3000
+	if _, err := f.db.RecordMediaMetadata(f.photo, statedb.MediaMetadata{CapturedAt: &at, Source: "exif", Offset: "+02:00", Lat: &lat, Lon: &lon, Width: &w, Height: &h}, 1); err != nil {
+		t.Fatal(err)
+	}
+	_, body := apiGet(t, f.c, f.srv+"/api/v1/media", f.tok)
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil || len(page.Items) != 2 {
+		t.Fatalf("%s (%v)", body, err)
+	}
+	byHash := map[string]map[string]any{}
+	for _, it := range page.Items {
+		byHash[it["sha256"].(string)] = it
+	}
+	p := byHash[f.photo]
+	if p["captured_at"] != "2024-05-01T09:30:00+02:00" || p["offset"] != "+02:00" || p["captured_from"] != "exif" ||
+		p["lat"] != lat || p["lon"] != lon || p["width"] != float64(w) || p["height"] != float64(h) {
+		t.Errorf("photo = %v", p)
+	}
+	for _, k := range []string{"captured_from", "offset", "lat", "lon", "width", "height"} {
+		if _, ok := byHash[f.video][k]; ok {
+			t.Errorf("video has %q, which nothing recorded", k)
+		}
+	}
+}
