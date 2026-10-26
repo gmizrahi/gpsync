@@ -65,6 +65,9 @@ CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status);
 -- which is what lets SQLite turn the prefix into an index range instead of
 -- reading every row.
 CREATE INDEX IF NOT EXISTS idx_uploads_path ON uploads(first_source_path COLLATE NOCASE);
+-- The media API's range query (issue #66): WHERE captured_at in a span,
+-- ORDER BY (captured_at, sha256), paged by a keyset cursor on the same pair.
+CREATE INDEX IF NOT EXISTS idx_uploads_captured ON uploads(captured_at, sha256);
 
 -- path is COLLATE NOCASE: Windows filesystems are case-insensitive (but
 -- case-preserving), and gpsync only ever runs there -- "C:\Photos\x.mp4" and

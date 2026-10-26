@@ -1,6 +1,9 @@
 package statedb
 
-import "database/sql"
+import (
+	"database/sql"
+	"os"
+)
 
 type FileSeen struct {
 	Path        string
@@ -8,6 +11,14 @@ type FileSeen struct {
 	Mtime       float64
 	Size        int64
 	LastScanned float64
+}
+
+// Unchanged reports whether a file's current size and modification time are
+// the ones recorded when it was hashed -- the scanner's test for reusing the
+// recorded hash instead of reading the file again, and the media API's for
+// trusting that the file still holds the content it was asked for.
+func (f FileSeen) Unchanged(info os.FileInfo) bool {
+	return f.Mtime == float64(info.ModTime().UnixNano())/1e9 && f.Size == info.Size()
 }
 
 func (db *DB) GetFileSeen(path string) (*FileSeen, error) {

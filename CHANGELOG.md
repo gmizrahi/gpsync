@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pasted in. `gpsync tray-quit` now uses the API too, with a token it mints
   for itself, so it still needs no password. See [docs/api.md](docs/api.md).
   (#67)
+- **A read-only media API.** A program on this machine can list the photos
+  and videos gpsync knows by capture time, and fetch a thumbnail or the
+  original of each, to show them in its own pages. Thumbnails are made from
+  the local files only when asked for, and cached in a folder you can choose
+  (`thumbnail_dir`), even inside your library, which scans then skip. A file
+  that changed since it was scanned isn't served until the next scan. See
+  [docs/api.md](docs/api.md). (#66)
 
 ## [0.4.1]
 

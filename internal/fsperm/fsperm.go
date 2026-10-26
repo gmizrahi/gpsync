@@ -62,6 +62,10 @@ func StagingPath(path string) string { return path + ".tmp" }
 // closes, and then calls CommitStaging -- separately, so a caller that must
 // stage several files before committing any (a restore) can.
 func CreateStaging(path string) (*os.File, error) {
+	return createStaging(path, false)
+}
+
+func createStaging(path string, tolerateNoACL bool) (*os.File, error) {
 	tmp := StagingPath(path)
 	if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("removing a stale %s: %w", tmp, err)
@@ -70,7 +74,7 @@ func CreateStaging(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := RestrictToOwner(tmp); err != nil {
+	if err := RestrictToOwner(tmp); err != nil && !(tolerateNoACL && errors.Is(err, ErrUnsupported)) {
 		f.Close()
 		os.Remove(tmp)
 		return nil, err
@@ -82,18 +86,37 @@ func CreateStaging(path string) (*os.File, error) {
 // result. On failure the staging file is removed, so nothing half-done is
 // left to be mistaken for a real one.
 func CommitStaging(path string) error {
+	return commitStaging(path, false)
+}
+
+func commitStaging(path string, tolerateNoACL bool) error {
 	tmp := StagingPath(path)
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return err
 	}
-	return RestrictToOwner(path)
+	if err := RestrictToOwner(path); err != nil && !(tolerateNoACL && errors.Is(err, ErrUnsupported)) {
+		return err
+	}
+	return nil
 }
 
 // WriteFileOwnerOnly atomically replaces path with data, readable only by
 // the current account on every OS.
 func WriteFileOwnerOnly(path string, data []byte) error {
-	f, err := CreateStaging(path)
+	return writeFile(path, data, false)
+}
+
+// WriteFileOwnerOnlyWhereSupported is WriteFileOwnerOnly for a folder the
+// user chose, which may be on a filesystem with no ACLs (exFAT, a cloud
+// drive): there the file is written anyway, with that filesystem's own
+// access rules.
+func WriteFileOwnerOnlyWhereSupported(path string, data []byte) error {
+	return writeFile(path, data, true)
+}
+
+func writeFile(path string, data []byte, tolerateNoACL bool) error {
+	f, err := createStaging(path, tolerateNoACL)
 	if err != nil {
 		return err
 	}
@@ -113,5 +136,5 @@ func WriteFileOwnerOnly(path string, data []byte) error {
 		os.Remove(StagingPath(path))
 		return err
 	}
-	return CommitStaging(path)
+	return commitStaging(path, tolerateNoACL)
 }

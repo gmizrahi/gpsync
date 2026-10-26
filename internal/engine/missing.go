@@ -270,7 +270,7 @@ func indexSourceFolders(db *statedb.DB, roots []string) (*sourceIndex, error) {
 				return nil
 			}
 			if d.IsDir() {
-				if path != root && scanner.IsIgnoredDirName(d.Name()) {
+				if path != root && scanner.IsIgnoredDir(path) {
 					return filepath.SkipDir
 				}
 				return nil

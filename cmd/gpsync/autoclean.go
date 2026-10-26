@@ -64,7 +64,7 @@ func isNowExcluded(path string) bool {
 		return true
 	}
 	for dir := filepath.Dir(path); ; {
-		if scanner.IsIgnoredDirName(filepath.Base(dir)) {
+		if scanner.IsIgnoredDir(dir) {
 			return true
 		}
 		parent := filepath.Dir(dir)

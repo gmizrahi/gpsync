@@ -44,7 +44,7 @@ func DiscoverSyncUnits(patterns []string) ([]string, error) {
 			if err != nil || !d.IsDir() {
 				return nil
 			}
-			if scanner.IsIgnoredDirName(d.Name()) {
+			if scanner.IsIgnoredDir(path) {
 				return filepath.SkipDir
 			}
 			entries, err := os.ReadDir(path)

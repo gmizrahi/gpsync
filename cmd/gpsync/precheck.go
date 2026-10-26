@@ -54,7 +54,7 @@ func precheckFolder(db *statedb.DB, src, dupesDir string, dryRun bool, out io.Wr
 			if strings.EqualFold(filepath.Clean(path), dupesDirClean) {
 				return filepath.SkipDir
 			}
-			if scanner.IsIgnoredDirName(d.Name()) {
+			if scanner.IsIgnoredDir(path) {
 				return filepath.SkipDir
 			}
 			return nil

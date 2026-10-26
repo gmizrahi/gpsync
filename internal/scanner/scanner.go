@@ -86,12 +86,36 @@ func IsIgnoredFileName(name string) bool {
 	return ignoreNames[n] || extraIgnoreNames[n]
 }
 
-// IsIgnoredDirName reports whether a directory name's whole subtree should
-// be skipped (e.g. Picasa's originals backup folder, or a user-configured
-// extra).
-func IsIgnoredDirName(name string) bool {
-	n := strings.ToLower(name)
-	return ignoreDirs[n] || extraIgnoreDirs[n]
+// IsIgnoredDir reports whether a directory's whole subtree should be
+// skipped: by its name (Picasa's originals backup folder, or a
+// user-configured extra), or because it is one of gpsync's own folders that
+// can sit inside a source folder (ApplyIgnoredDirPaths).
+func IsIgnoredDir(path string) bool {
+	n := strings.ToLower(filepath.Base(path))
+	if ignoreDirs[n] || extraIgnoreDirs[n] {
+		return true
+	}
+	for _, p := range ignoredDirPaths {
+		if pathx.Same(filepath.Clean(path), p) {
+			return true
+		}
+	}
+	return false
+}
+
+// ignoredDirPaths are folders gpsync writes into that may be inside a source
+// folder -- the thumbnail folder -- skipped by exact path, not by name, so a
+// folder elsewhere that happens to share the name is still scanned.
+var ignoredDirPaths []string
+
+// ApplyIgnoredDirPaths installs the folders IsIgnoredDir skips by path,
+// replacing whatever was installed before.
+func ApplyIgnoredDirPaths(paths []string) {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, filepath.Clean(p))
+	}
+	ignoredDirPaths = out
 }
 
 // IsInOriginalsFolder reports whether path's IMMEDIATE parent directory is
@@ -211,7 +235,7 @@ func ExpandFolders(patterns []string, onSkip func(path, reason string)) ([]strin
 						return nil
 					}
 					if d.IsDir() {
-						if IsIgnoredDirName(d.Name()) {
+						if IsIgnoredDir(path) {
 							if onSkip != nil {
 								onSkip(path, "ignored directory")
 							}
@@ -540,8 +564,7 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 		if err != nil {
 			return summary, err
 		}
-		mtime := float64(res.info.ModTime().UnixNano()) / 1e9
-		if seen != nil && seen.Mtime == mtime && seen.Size == res.info.Size() {
+		if seen != nil && seen.Unchanged(res.info) {
 			cacheHits = append(cacheHits, seen)
 			continue
 		}

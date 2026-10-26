@@ -35,6 +35,7 @@ password hash.
 | `dashboard_port` | number | Dashboard port (0 picks a free one) |
 | `dashboard_auth_enabled` | true/false | Require a username and password for the dashboard |
 | `api_token_lifetime` | text | Lifetime of a new [API token](api.md) created without `--expires`: like `90d`, `12h`, or `never` (default `90d`) |
+| `thumbnail_dir` | text | Where the [media API](api.md) keeps the thumbnails it makes (default: `thumbs` in gpsync's state folder). Can be inside a source folder, such as `D:\Pictures\.thumbnails`: scans skip it. It can't be a source folder or contain one |
 | `dashboard_auth_user` | text | Dashboard username |
 | `dashboard_auth_pass_hash` | text | bcrypt hash of the dashboard password; never the password itself |
 | `dashboard_tls_mode` | text | `off`, `self-signed` or `files` |

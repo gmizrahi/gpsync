@@ -10,6 +10,7 @@
 package pathx
 
 import (
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -36,4 +37,19 @@ func Same(a, b string) bool {
 		return strings.EqualFold(a, b)
 	}
 	return a == b
+}
+
+// Within reports whether p is dir or somewhere under it, by this platform's
+// case rules.
+// Not filepath.Rel: on Windows that folds case on its own, so the case rule
+// would come from two places.
+func Within(p, dir string) bool {
+	p, dir = Key(filepath.Clean(p)), Key(filepath.Clean(dir))
+	if p == dir {
+		return true
+	}
+	if !strings.HasSuffix(dir, string(filepath.Separator)) {
+		dir += string(filepath.Separator) // a root like "/" or `C:\` already ends in one
+	}
+	return strings.HasPrefix(p, dir)
 }

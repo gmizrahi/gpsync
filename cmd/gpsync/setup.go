@@ -8,6 +8,7 @@ import (
 
 	"github.com/gmizrahi/gpsync/internal/auth"
 	"github.com/gmizrahi/gpsync/internal/config"
+	"github.com/gmizrahi/gpsync/internal/engine"
 	"github.com/spf13/cobra"
 )
 
@@ -230,6 +231,11 @@ func runShowConfig() error {
 		fmt.Printf("  Backup folder:    %s (keeping %d)\n", cfg.BackupDir, cfg.BackupKeepCount)
 	} else {
 		fmt.Println("  Backup folder:    (none configured -- run `gpsync backup --dest <folder>`)")
+	}
+	if dir, err := engine.ThumbnailDir(cfg); err != nil {
+		fmt.Printf("  Thumbnail folder: %s -- not used: %v\n", cfg.ThumbnailDir, err)
+	} else {
+		fmt.Printf("  Thumbnail folder: %s\n", dir)
 	}
 
 	if len(cfg.ExtraSupportedPhotoExtensions) > 0 || len(cfg.ExtraSupportedVideoExtensions) > 0 ||

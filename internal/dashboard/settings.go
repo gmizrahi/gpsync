@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -70,6 +71,8 @@ type settingsPageData struct {
 	// form; the tokens themselves are managed in their own card after it,
 	// since forms can't nest.
 	APITokenLifetime   string
+	ThumbnailDir       string
+	DefaultThumbDir    string
 	APITokens          []apiTokenRow
 	TokenNotice        apiTokenNotice
 	TokenExpiryChoices []string
@@ -305,6 +308,11 @@ var settingsTmpl = template.Must(template.New("settings").Parse(`
       <input type="text" id="api_token_lifetime" name="api_token_lifetime" value="{{.APITokenLifetime}}" placeholder="90d">
       <div class="hint">Like <code>90d</code>, <code>12h</code> or <code>never</code>. Used when a token is created without its own expiry. Each token keeps the lifetime it was created with, and a program rotating its token renews that lifetime. The tokens themselves are below.</div>
     </div>
+    <div class="field">
+      <label for="thumbnail_dir">Thumbnail folder</label>
+      <input type="text" id="thumbnail_dir" name="thumbnail_dir" value="{{.ThumbnailDir}}" placeholder="{{.DefaultThumbDir}}">
+      <div class="hint">Where thumbnails are kept for programs that show your photos, made only when one is asked for, up to 1 GiB. Can be inside a source folder, such as <code>D:\Pictures\.thumbnails</code>: scans skip it. Not a source folder itself. Empty: <code>{{.DefaultThumbDir}}</code>.</div>
+    </div>
   </div>
   <details class="advanced">
     <summary>Advanced: extension overrides</summary>
@@ -416,6 +424,8 @@ func renderSettingsPage(db *statedb.DB, cfg config.Config, saved, restartRequire
 		ErrorMessage:    errMsg,
 
 		APITokenLifetime:   cfg.APITokenLifetime,
+		ThumbnailDir:       cfg.ThumbnailDir,
+		DefaultThumbDir:    filepath.Join(statedb.StateDir, "thumbs"),
 		APITokens:          tokens,
 		TokenNotice:        notice,
 		TokenExpiryChoices: apiTokenExpiryChoices,
