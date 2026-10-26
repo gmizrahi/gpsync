@@ -177,6 +177,11 @@ type Config struct {
 	// itself would change the scheme under anyone holding a saved http://
 	// bookmark. Like the fields above, it takes effect on the next restart.
 	DashboardTLSMode string `toml:"dashboard_tls_mode"`
+
+	// APITokenLifetime is how long an API token lives when created without
+	// an explicit expiry, and the fresh lifetime each rotation grants:
+	// "90d", "12h", "30m", or "never" (issue #67).
+	APITokenLifetime string `toml:"api_token_lifetime"`
 	// DashboardTLSCertFile/DashboardTLSKeyFile are a certificate and key
 	// the user manages -- mkcert, a home CA, or a real CA. Read in
 	// TLSModeFiles and never written to: regenerating over a key gpsync
@@ -255,6 +260,7 @@ func Defaults() Config {
 		DashboardHTTPSPort:            0,
 		DashboardAuthEnabled:          false,
 		DashboardTLSMode:              TLSModeOff,
+		APITokenLifetime:              "90d",
 	}
 }
 

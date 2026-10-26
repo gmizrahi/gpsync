@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An HTTP API for programs on this machine, with API tokens.** A script or
+  a companion app can call gpsync under `/api/v1/` with a bearer token,
+  created with `gpsync token create` or from Settings. A token is shown
+  once, and only its hash is stored. The API answers on loopback only and
+  requires a token even when dashboard login is off. A dashboard login
+  doesn't open the API, and a token doesn't open the dashboard. A program
+  can rotate its own token before it expires, so it never needs a new one
+  pasted in. `gpsync tray-quit` now uses the API too, with a token it mints
+  for itself, so it still needs no password. See [docs/api.md](docs/api.md).
+  (#67)
+
 ## [0.4.1]
 
 Two security fixes. If you restore backups on Windows, the first one

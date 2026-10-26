@@ -143,18 +143,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
 			return
 		}
-		if quitGracefully == nil {
-			http.Error(w, "this build has no graceful-quit hook", http.StatusNotImplemented)
-			return
-		}
-		// Answer BEFORE quitting: the callback stops this very server, so
-		// a caller waiting on the response would otherwise be racing the
-		// shutdown that its own request is holding open.
-		w.WriteHeader(http.StatusAccepted)
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
-		go quitGracefully()
+		serveQuit(w, quitGracefully)
 	})
 	mux.HandleFunc("/api/skip-file", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -174,6 +163,25 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		wc.CancelFile(path)
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("/settings/api-tokens", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		handleAPITokenCreate(w, r, db, cfg)
+	})
+	mux.HandleFunc("/settings/api-tokens/revoke", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		handleAPITokenRevoke(w, r, db)
+	})
 	mux.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			handleSettingsSave(w, r, wc)
@@ -185,7 +193,11 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 			return
 		}
 		q := r.URL.Query()
-		page, err := renderSettingsPage(db, cfg, q.Get("saved") == "1", q.Get("restart") == "1", q.Get("error"))
+		notice := apiTokenNotice{Error: q.Get("token_error")}
+		if name := q.Get("token_revoked"); name != "" {
+			notice.Message = "Token " + name + " revoked. Anything still using it is now refused."
+		}
+		page, err := renderSettingsPage(db, cfg, q.Get("saved") == "1", q.Get("restart") == "1", q.Get("error"), notice)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -389,5 +401,33 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		handleOriginalsRaw(w, r, db)
 	})
 
-	return frameDenyMiddleware(csrfMiddleware(sessionAuthMiddleware(mux, db, cfg)))
+	// Two halves under one anti-framing wrapper: the token API, which never
+	// looks at a cookie, and the dashboard, which never looks at a token.
+	api := apiV1Handler(db, quitGracefully)
+	dashboard := csrfMiddleware(sessionAuthMiddleware(mux, db, cfg))
+	return frameDenyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isAPIv1(r) {
+			api.ServeHTTP(w, r)
+			return
+		}
+		dashboard.ServeHTTP(w, r)
+	}))
+}
+
+// serveQuit asks the tray to quit gracefully -- in-flight uploads finish,
+// no new ones start -- for both the dashboard's /api/quit and the token
+// API's /api/v1/control/quit.
+func serveQuit(w http.ResponseWriter, quit func()) {
+	if quit == nil {
+		http.Error(w, "this build has no graceful-quit hook", http.StatusNotImplemented)
+		return
+	}
+	// Answer BEFORE quitting: the callback stops this very server, so a
+	// caller waiting on the response would otherwise be racing the shutdown
+	// that its own request is holding open.
+	w.WriteHeader(http.StatusAccepted)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	go quit()
 }

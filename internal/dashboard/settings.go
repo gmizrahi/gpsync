@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gmizrahi/gpsync/internal/auth"
 	"github.com/gmizrahi/gpsync/internal/config"
@@ -64,6 +65,14 @@ type settingsPageData struct {
 	Saved           bool
 	RestartRequired bool
 	ErrorMessage    string
+
+	// API tokens (issue #67): the default lifetime is part of the main
+	// form; the tokens themselves are managed in their own card after it,
+	// since forms can't nest.
+	APITokenLifetime   string
+	APITokens          []apiTokenRow
+	TokenNotice        apiTokenNotice
+	TokenExpiryChoices []string
 }
 
 // accountStatusData is read-only OAuth status for the Account card --
@@ -289,6 +298,14 @@ var settingsTmpl = template.Must(template.New("settings").Parse(`
       <input type="password" id="dashboard_auth_password" name="dashboard_auth_password" autocomplete="new-password" placeholder="{{if .DashboardAuthSet}}Leave blank to keep the current password{{else}}Required to enable authentication{{end}}">
     </div>
   </div>
+  <div class="card">
+    <h2>API</h2>
+    <div class="field">
+      <label for="api_token_lifetime">Lifetime of a new API token</label>
+      <input type="text" id="api_token_lifetime" name="api_token_lifetime" value="{{.APITokenLifetime}}" placeholder="90d">
+      <div class="hint">Like <code>90d</code>, <code>12h</code> or <code>never</code>. Used when a token is created without its own expiry. Each token keeps the lifetime it was created with, and a program rotating its token renews that lifetime. The tokens themselves are below.</div>
+    </div>
+  </div>
   <details class="advanced">
     <summary>Advanced: extension overrides</summary>
     <div class="card">
@@ -317,6 +334,26 @@ var settingsTmpl = template.Must(template.New("settings").Parse(`
   </details>
   <button type="submit" id="save-btn">Save</button>
 </form>
+
+<div class="card" id="api-tokens" style="margin-top:1.5rem;">
+  <h2>API tokens</h2>
+  <div class="hint" style="margin-bottom:0.8rem;">For programs on this machine calling <code>/api/v1</code>, with <code>Authorization: Bearer &lt;token&gt;</code>. A token is shown once, when it's created &mdash; gpsync keeps only a hash of it. Tokens created here can read; <code>gpsync token create</code> can grant more.</div>
+  {{with .TokenNotice}}
+    {{if .NewToken}}<div class="banner banner-ok">Token <b>{{.NewName}}</b> created. Copy it now &mdash; it won't be shown again:<br><code class="token-reveal">{{.NewToken}}</code></div>{{end}}
+    {{if .Message}}<div class="banner banner-ok">{{.Message}}</div>{{end}}
+    {{if .Error}}<div class="banner banner-err">{{.Error}}</div>{{end}}
+  {{end}}
+  {{range .APITokens}}
+  <div class="row"><span class="label">{{.Name}} <span class="hint">{{.Scopes}}</span></span><span class="row-actions"><span class="hint">created {{.Created}} &middot; last used {{.LastUsed}} &middot; {{if .Expired}}<b>expired</b> {{.Expires}}{{else}}expires {{.Expires}}{{end}}</span><form method="post" action="/settings/api-tokens/revoke" onsubmit="return confirm('Revoke this token? Programs using it stop working at once.');"><input type="hidden" name="token_name" value="{{.Name}}"><button type="submit" class="btn-sm">Revoke</button></form></span></div>
+  {{else}}<div class="hint">No API tokens yet.</div>{{end}}
+  <form method="post" action="/settings/api-tokens" class="btn-row" style="margin-top:0.9rem;">
+    <input type="text" name="token_name" placeholder="Name, like photos-app" aria-label="Token name" required pattern="[A-Za-z0-9._\-]{1,64}" style="flex:1 1 14rem;">
+    <select name="token_expires" aria-label="Expires" style="width:auto;">
+      {{range .TokenExpiryChoices}}<option value="{{.}}">{{if eq . "default"}}Default lifetime{{else if eq . "never"}}Never expires{{else}}Expires in {{.}}{{end}}</option>{{end}}
+    </select>
+    <button type="submit" class="btn-secondary">Create token</button>
+  </form>
+</div>
 `))
 
 // mediaTypeFormValue maps a config.Config's Kind back to this form's
@@ -332,7 +369,11 @@ func mediaTypeFormValue(k extensions.Kind) string {
 	}
 }
 
-func renderSettingsPage(db *statedb.DB, cfg config.Config, saved, restartRequired bool, errMsg string) (string, error) {
+func renderSettingsPage(db *statedb.DB, cfg config.Config, saved, restartRequired bool, errMsg string, notice apiTokenNotice) (string, error) {
+	tokens, err := apiTokenRows(db, time.Now())
+	if err != nil {
+		return "", err
+	}
 	data := settingsPageData{
 		Account: accountStatus(),
 
@@ -373,6 +414,11 @@ func renderSettingsPage(db *statedb.DB, cfg config.Config, saved, restartRequire
 		Saved:           saved,
 		RestartRequired: restartRequired,
 		ErrorMessage:    errMsg,
+
+		APITokenLifetime:   cfg.APITokenLifetime,
+		APITokens:          tokens,
+		TokenNotice:        notice,
+		TokenExpiryChoices: apiTokenExpiryChoices,
 	}
 	var buf strings.Builder
 	if err := settingsTmpl.Execute(&buf, data); err != nil {
