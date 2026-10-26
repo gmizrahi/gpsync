@@ -28,6 +28,11 @@ var (
 	// phone/app export filenames, e.g. WhatsApp's
 	// "IMG-20220701-WA0060.jpg" or "VID-20210603-WA0007.mp4".
 	pathDateCompactRe = regexp.MustCompile(`((?:19|20)\d{2})(\d{2})(\d{2})`)
+	// pathYearMonthRe matches a year and month with no day: a
+	// "2024_05 Trip" or "2024-05" folder, or a bare "202405" (#73). Unlike
+	// the two above it must not be part of a longer number, or a counter
+	// such as "IMG_200512345" would read as a month.
+	pathYearMonthRe = regexp.MustCompile(`(?:^|\D)((?:19|20)\d{2})[-_.]?(0[1-9]|1[0-2])(?:\D|$)`)
 	// pathYearOnlyRe is the last resort: just a plausible 4-digit year
 	// anywhere in the path, e.g. a library organized as "Photos/2002/...".
 	pathYearOnlyRe = regexp.MustCompile(`(?:19|20)\d{2}`)
@@ -46,10 +51,11 @@ var (
 //
 // Tries, in order: a separated YYYY-MM-DD date anywhere in the path (most
 // precise), then a compact YYYYMMDD run (common in phone/app exports),
-// then a bare plausible year with no day/month information (defaults to
-// January 1st, noon UTC -- noon avoids a date-only match shifting to the
-// adjacent calendar day when later rendered in a different timezone).
-// Returns false if nothing plausible is found anywhere in the path.
+// then a year and month (the 1st of that month), then a bare plausible
+// year with no day/month information (January 1st). Every one is at noon
+// UTC -- noon avoids a date-only match shifting to the adjacent calendar
+// day when later rendered in a different timezone. Returns false if
+// nothing plausible is found anywhere in the path.
 func DateFromPath(path string) (time.Time, bool) {
 	if m := pathDateSepRe.FindStringSubmatch(path); m != nil {
 		if t, ok := buildDateFromParts(m[1], m[2], m[3]); ok {
@@ -61,12 +67,24 @@ func DateFromPath(path string) (time.Time, bool) {
 			return t, true
 		}
 	}
+	if m := pathYearMonthRe.FindStringSubmatch(path); m != nil {
+		if t, ok := buildDateFromParts(m[1], m[2], "01"); ok {
+			return t, true
+		}
+	}
 	if m := pathYearOnlyRe.FindString(path); m != "" {
 		if y, ok := plausibleYear(m); ok {
-			return time.Date(y, time.January, 1, 12, 0, 0, 0, time.UTC), true
+			return YearOnlyDate(y), true
 		}
 	}
 	return time.Time{}, false
+}
+
+// YearOnlyDate is the date DateFromPath gives a path that names only a
+// year: January 1st, noon UTC. fix-dates recognizes it to refine rows
+// dated by it before a path rule could read more.
+func YearOnlyDate(y int) time.Time {
+	return time.Date(y, time.January, 1, 12, 0, 0, 0, time.UTC)
 }
 
 func buildDateFromParts(yearStr, monthStr, dayStr string) (time.Time, bool) {

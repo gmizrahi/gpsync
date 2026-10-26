@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the next scan, which reads each one's EXIF once; that first scan takes
   longer than usual. (#68)
 
+### Fixed
+
+- **Year-and-month folders date their files to that month.** A file with no
+  EXIF date in a folder such as `2024_05 Trip`, `2024-05` or `202405` was
+  dated January 1st of that year; it's now the 1st of the month.
+  `gpsync fix-dates` corrects files already dated that way. (#73)
+
 ## [0.5.0]
 
 A local HTTP API, so another program on this PC can show the photos gpsync

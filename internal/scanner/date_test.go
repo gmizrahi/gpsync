@@ -114,3 +114,25 @@ func TestCaptureDate_PrefersPathOverMtime(t *testing.T) {
 		t.Errorf("ReadMetadata = %v (year %d), want year 2002 (from the path, not the drifted 2026 mtime)", gotTime, gotTime.Year())
 	}
 }
+
+// #73: a year and month with no day -- "2024_05 Trip", "2024-05", "2024.05"
+// or a bare "202405" -- is the 1st of that month. A fuller date still wins,
+// and digits that are part of a longer number aren't read as a month.
+func TestDateFromPath_YearAndMonth(t *testing.T) {
+	for path, want := range map[string]string{
+		`C:\Photos\2024_05 Trip\IMG_1234.jpg`:    "2024-05-01",
+		"/lib/2024-05/x.jpg":                     "2024-05-01",
+		"/lib/2024.11/x.jpg":                     "2024-11-01",
+		"/lib/202405/x.jpg":                      "2024-05-01",
+		"/lib/2024_05 Trip/2024-05-17 beach.jpg": "2024-05-17", // the full date wins
+		"/lib/2024_13 Trip/x.jpg":                "2024-01-01", // no month 13: year only
+		"/lib/IMG_200512345.jpg":                 "2005-01-01", // a counter, not 2005-12
+		"/lib/P1202405.jpg":                      "2024-01-01", // a digit before it: not a month either
+		"/lib/2024_05_x.jpg":                     "2024-05-01",
+	} {
+		got, ok := DateFromPath(path)
+		if !ok || got.Format("2006-01-02") != want || got.Hour() != 12 || got.Location() != time.UTC {
+			t.Errorf("DateFromPath(%q) = %v, %v; want %s at noon UTC", path, got, ok, want)
+		}
+	}
+}

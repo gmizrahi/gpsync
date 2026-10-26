@@ -51,7 +51,7 @@ func fixDatesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "fix-dates",
 		Short: "Correct capture dates from the dates in folder and file names",
-		Long: "Files without readable EXIF get their capture date from the file's modified time, which copying and backups can change. This reads the date from the path instead (a 2002 or 2002_07 folder, or a name such as IMG-20220701-WA0060.jpg) and updates the stored date wherever the year differs.\n" +
+		Long: "Files without readable EXIF get their capture date from the file's modified time, which copying and backups can change. This reads the date from the path instead (a 2002 or 2002_07 folder, or a name such as IMG-20220701-WA0060.jpg) and updates the stored date wherever the year differs, or where only the year was known and the path gives the month.\n" +
 			"\n" +
 			"Safe to run repeatedly.",
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -93,3 +93,38 @@ func TestFixDates_DryRunCountsButWritesNothing(t *testing.T) {
 		t.Errorf("real pass fixed %d, dry run said %d", wet.Fixed, dry.Fixed)
 	}
 }
+
+// #73: rows dated by the year-only rule before a "2024_05" folder could be
+// read are refined to that month -- but only those: a real time in the same
+// year is left alone, as is a year-only date whose path still says no more,
+// and a second run changes nothing.
+func TestFixDates_RefinesTheYearOnlyDateWhenThePathSaysMore(t *testing.T) {
+	db := openTestDB(t)
+	yearOnly := float64(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC).Unix())
+	realTime := float64(time.Date(2024, 1, 1, 9, 15, 0, 0, time.UTC).Unix())
+	seedDated(t, db, "month", filepath.Join("C:", "Photos", "2024_05 Trip", "IMG_1.jpg"), &yearOnly)
+	seedDated(t, db, "exif", filepath.Join("C:", "Photos", "2024_05 Trip", "IMG_2.jpg"), &realTime)
+	seedDated(t, db, "year", filepath.Join("C:", "Photos", "2024", "IMG_3.jpg"), &yearOnly)
+
+	sum, err := FixDates(db, false)
+	if err != nil || sum.Fixed != 1 {
+		t.Fatalf("FixDates = %+v, %v; want exactly the year-only row in the month folder fixed", sum, err)
+	}
+	want := map[string]time.Time{
+		"month": time.Date(2024, 5, 1, 12, 0, 0, 0, time.UTC),
+		"exif":  time.Unix(int64(realTime), 0).UTC(),
+		"year":  time.Unix(int64(yearOnly), 0).UTC(),
+	}
+	rows, err := db.AllCaptureDates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if got := time.Unix(int64(r.CapturedAt.Float64), 0).UTC(); !got.Equal(want[r.SHA256]) {
+			t.Errorf("%s: %v, want %v", r.SHA256, got, want[r.SHA256])
+		}
+	}
+	if sum, _ := FixDates(db, false); sum.Fixed != 0 {
+		t.Errorf("second run fixed %d; want 0", sum.Fixed)
+	}
+}
