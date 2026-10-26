@@ -196,8 +196,15 @@ func TestReadMetadata(t *testing.T) {
 	// A video: a date, nothing else.
 	p = filepath.Join(dir, "e.mp4")
 	writeFile(t, p, []byte("not parsed"))
-	if m := ReadMetadata(p); m.Source != CaptureFromMtime || m.Width != nil || m.Offset != "" {
-		t.Errorf("video: %+v; want an mtime date only", m)
+	// Its date is the mtime -- unless the temp folder's random name happens
+	// to hold a plausible year, which a path date then correctly prefers
+	// (it did on a macOS runner). Expect whatever DateFromPath says.
+	wantSource := CaptureFromMtime
+	if _, ok := DateFromPath(p); ok {
+		wantSource = CaptureFromPath
+	}
+	if m := ReadMetadata(p); m.Source != wantSource || m.Width != nil || m.Offset != "" {
+		t.Errorf("video: %+v; want a %s date only", m, wantSource)
 	}
 }
 
