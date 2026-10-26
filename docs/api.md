@@ -150,7 +150,8 @@ that are ignored, waiting for a review decision, or confirmed missing.
    where the photo was taken. Otherwise it's read as this machine's local
    time, and shown in this machine's zone.
 2. `path`: a date in the file's path, such as `2024-05-01` or `20240501`,
-   at noon UTC; a bare year means January 1st.
+   at noon UTC. A year and month, such as a `2024_05 Trip` folder, means
+   the 1st of that month; a bare year means January 1st.
 3. `mtime`: the file's modification time.
 
 Files gpsync knew before it recorded these get them on the next scan,

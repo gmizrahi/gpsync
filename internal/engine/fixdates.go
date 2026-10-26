@@ -15,7 +15,8 @@ type FixDatesSummary struct {
 }
 
 // FixDates backfills capture dates from the file path for rows whose
-// stored date disagrees on the YEAR.
+// stored date disagrees on the YEAR, or is the year-only date while the
+// path now gives a month or day.
 //
 // The scanner now prefers a date parsed from the path over filesystem
 // mtime, but that only helps NEW scans: EnsurePending is `ON CONFLICT DO
@@ -42,7 +43,11 @@ func FixDates(db *statedb.DB, dryRun bool) (FixDatesSummary, error) {
 			sum.Unchanged++
 			continue
 		}
-		if r.CapturedAt.Valid && time.Unix(int64(r.CapturedAt.Float64), 0).UTC().Year() == t.Year() {
+		// Same year: leave it -- unless it is exactly the year-only date and
+		// the path now says more, as a "2024_05" folder does since #73. A
+		// real capture at that exact second is not a realistic worry.
+		if r.CapturedAt.Valid && time.Unix(int64(r.CapturedAt.Float64), 0).UTC().Year() == t.Year() &&
+			(int64(r.CapturedAt.Float64) != scanner.YearOnlyDate(t.Year()).Unix() || t.Equal(scanner.YearOnlyDate(t.Year()))) {
 			sum.Unchanged++
 			continue
 		}

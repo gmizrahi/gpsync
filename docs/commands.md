@@ -250,7 +250,7 @@ Example: gpsync verify --sample 200
 
 Correct capture dates from the dates in folder and file names.
 
-Files without readable EXIF get their capture date from the file's modified time, which copying and backups can change. This reads the date from the path instead (a 2002 or 2002_07 folder, or a name such as IMG-20220701-WA0060.jpg) and updates the stored date wherever the year differs.
+Files without readable EXIF get their capture date from the file's modified time, which copying and backups can change. This reads the date from the path instead (a 2002 or 2002_07 folder, or a name such as IMG-20220701-WA0060.jpg) and updates the stored date wherever the year differs, or where only the year was known and the path gives the month.
 
 Safe to run repeatedly.
 
