@@ -9,7 +9,7 @@ import (
 // TestBuildStatistics_PathYearWinsOverDriftedMtime covers per-year counts
 // coming out wrong. Verified against a real library: files with no
 // readable EXIF fall back to
-// scanner.captureDate()'s filesystem-mtime path, and mtime had drifted
+// scanner.ReadMetadata()'s filesystem-mtime path, and mtime had drifted
 // to 2025/2026 for files whose OWN FILENAMES say "2002-07-10" -- a
 // later copy/backup/migration touched them long after the photo was
 // actually taken. yearFromPath must win over such a captured_at when

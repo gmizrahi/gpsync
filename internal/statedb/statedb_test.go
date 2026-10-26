@@ -1323,7 +1323,7 @@ func TestAllCaptureDatesAndUpdateCapturedAt(t *testing.T) {
 	}
 
 	fixed := 1015887545.0 // a real March-2002 timestamp
-	if err := db.UpdateCapturedAt("h-pending", fixed); err != nil {
+	if err := db.UpdateCapturedAt("h-pending", fixed, "path"); err != nil {
 		t.Fatal(err)
 	}
 	row, err := db.GetUpload("h-pending")
@@ -1332,6 +1332,9 @@ func TestAllCaptureDatesAndUpdateCapturedAt(t *testing.T) {
 	}
 	if !row.CapturedAt.Valid || row.CapturedAt.Float64 != fixed {
 		t.Errorf("captured_at after UpdateCapturedAt = %+v, want %v", row.CapturedAt, fixed)
+	}
+	if m, err := db.GetListableMedia("h-pending"); err != nil || m.CaptureSource.String != "path" {
+		t.Errorf("capture_source after UpdateCapturedAt = %+v (%v), want path: the new time came from there", m, err)
 	}
 	if row.Status != "pending" || row.Size != 100 {
 		t.Errorf("UpdateCapturedAt disturbed other fields: status=%q size=%d, want pending/100 unchanged", row.Status, row.Size)

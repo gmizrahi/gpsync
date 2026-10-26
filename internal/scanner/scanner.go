@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rwcarlsen/goexif/exif"
-
 	"github.com/gmizrahi/gpsync/internal/extensions"
 	"github.com/gmizrahi/gpsync/internal/hashing"
 	"github.com/gmizrahi/gpsync/internal/pathx"
@@ -184,10 +182,6 @@ var mimeByExt = map[string]string{
 	"mpeg": "video/mpeg",
 }
 
-// exifCapableExts: goexif only decodes JPEG/TIFF-container EXIF. Everything
-// else (PNG, HEIC, RAW, video) falls back to filesystem mtime for capture date.
-var exifCapableExts = map[string]bool{"jpg": true, "jpeg": true, "tif": true, "tiff": true}
-
 func GuessMime(path string) string {
 	if m, ok := mimeByExt[extensions.ExtOf(path)]; ok {
 		return m
@@ -321,43 +315,6 @@ func fileIsScannable(path string, onSkip func(path, reason string)) bool {
 	return true
 }
 
-func captureDate(path string) *float64 {
-	if exifCapableExts[extensions.ExtOf(path)] {
-		if f, err := os.Open(path); err == nil {
-			defer f.Close()
-			if x, err := exif.Decode(f); err == nil {
-				for _, field := range []exif.FieldName{exif.DateTimeOriginal, exif.DateTime} {
-					if tag, err := x.Get(field); err == nil {
-						if s, err := tag.StringVal(); err == nil {
-							if t, err := time.ParseInLocation("2006:01:02 15:04:05", s, time.Local); err == nil {
-								ts := float64(t.Unix())
-								return &ts
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	// A date embedded in the file's own path (folder names, filename) --
-	// tried BEFORE the filesystem-mtime fallback below, since mtime is
-	// demonstrably unreliable: files whose own filenames stated their
-	// capture date ("2002-07-10-01.jpg") had an mtime drifted decades
-	// forward, almost certainly from a
-	// later backup/migration touching the file long after it was taken.
-	// See DateFromPath's own doc comment for the full story.
-	if t, ok := DateFromPath(path); ok {
-		ts := float64(t.Unix())
-		return &ts
-	}
-	// Last resort: filesystem mtime.
-	if info, err := os.Stat(path); err == nil {
-		ts := float64(info.ModTime().Unix())
-		return &ts
-	}
-	return nil
-}
-
 type ScanSummary struct {
 	FilesSeen   int
 	FilesHashed int
@@ -373,6 +330,10 @@ type ScanSummary struct {
 	// StaleCache counts scan-cache entries dropped for paths that no
 	// longer exist.
 	StaleCache int
+	// MetadataRead counts already-known files whose metadata (#68) this
+	// scan read for the first time -- the backfill, which makes the first
+	// scan after an upgrade slower than usual.
+	MetadataRead int
 	// Unsettled counts files skipped because they changed while being
 	// hashed -- a copy still in progress. They get no ledger row at all,
 	// so the next scan picks them up once they are quiet.
@@ -441,12 +402,12 @@ func (t *inFlightTracker) snapshot() []string {
 // computed in a worker goroutine; all statedb writes happen back on the
 // single calling goroutine (SQLite only wants one writer at a time).
 type hashJob struct {
-	path       string
-	digest     string
-	capturedAt *float64
-	size       int64
-	mtime      float64
-	err        error
+	path   string
+	digest string
+	meta   Metadata
+	size   int64
+	mtime  float64
+	err    error
 	// unsettled means the file changed while we were reading it, so the
 	// digest and the stat describe two different states of the file and
 	// neither may be recorded. See the re-stat in the hashing worker.
@@ -615,7 +576,7 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 					results <- hashJob{path: p, err: err}
 					continue
 				}
-				capturedAt := captureDate(p)
+				meta := ReadMetadata(p)
 				// The size/mtime above come from the earlier stat pass, but
 				// the digest covers whatever was on disk just now. A file
 				// still being written (a phone copying over MTP, a network
@@ -632,11 +593,11 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 					continue
 				}
 				results <- hashJob{
-					path:       p,
-					digest:     digest,
-					capturedAt: capturedAt,
-					size:       after.Size(),
-					mtime:      float64(after.ModTime().UnixNano()) / 1e9,
+					path:   p,
+					digest: digest,
+					meta:   meta,
+					size:   after.Size(),
+					mtime:  float64(after.ModTime().UnixNano()) / 1e9,
 				}
 			}
 		}()
@@ -668,7 +629,7 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 		}
 		switch {
 		case markSynced:
-			err = db.EnsureMarkedSynced(job.digest, job.size, GuessMime(job.path), job.path, job.capturedAt)
+			err = db.EnsureMarkedSynced(job.digest, job.size, GuessMime(job.path), job.path, job.meta.CapturedAt)
 		case IsInOriginalsFolder(job.path):
 			// Never auto-queued -- see IsInOriginalsFolder's own doc
 			// comment. Still hashed and tracked (UpsertFileSeen above
@@ -676,11 +637,14 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 			// FindByBasename can find it as a candidate for OTHER
 			// originals-folder items, just routed to needs_review instead
 			// of pending.
-			err = db.EnsureNeedsReview(job.digest, job.size, GuessMime(job.path), job.path, job.capturedAt)
+			err = db.EnsureNeedsReview(job.digest, job.size, GuessMime(job.path), job.path, job.meta.CapturedAt)
 		default:
-			err = db.EnsurePending(job.digest, job.size, GuessMime(job.path), job.path, job.capturedAt)
+			err = db.EnsurePending(job.digest, job.size, GuessMime(job.path), job.path, job.meta.CapturedAt)
 		}
 		if err != nil {
+			return summary, err
+		}
+		if err := recordMetadata(db, job.digest, job.meta, float64(time.Now().UnixNano())/1e9); err != nil {
 			return summary, err
 		}
 		if wasNewlyRegistered(existing, markSynced) {
@@ -695,6 +659,10 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 		if onProgress != nil {
 			onProgress(ProgressEvent{Done: filesDone, Total: len(toHash), CurrentFile: job.path, InFlight: inFlight.snapshot()})
 		}
+	}
+
+	if summary.MetadataRead, err = backfillMetadata(db, cacheHits, concurrency); err != nil {
+		return summary, err
 	}
 
 	if err := sweepMissing(db, patterns, allPaths, &summary); err != nil {

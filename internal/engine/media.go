@@ -12,6 +12,7 @@ import (
 
 	"github.com/gmizrahi/gpsync/internal/extensions"
 	"github.com/gmizrahi/gpsync/internal/preprocess"
+	"github.com/gmizrahi/gpsync/internal/scanner"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
 
@@ -43,15 +44,19 @@ var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // 64 lowercase hex digits.
 func ValidSHA256(s string) bool { return sha256Pattern.MatchString(s) }
 
-// MediaItem is one listed file. CapturedAt is in this machine's time zone,
-// which is how the scanner read the EXIF time it came from (see docs/api.md
-// for what it means and where it comes from).
+// MediaItem is one listed file. CapturedAt is in the camera's own zone when
+// it recorded one (Offset), else this machine's (see docs/api.md for what it
+// means and where it comes from). The rest is set only when known.
 type MediaItem struct {
-	SHA256     string
-	CapturedAt time.Time
-	Kind       extensions.Kind // photo or video; empty if the extension is no longer a known one
-	MimeType   string
-	HasThumb   bool
+	SHA256        string
+	CapturedAt    time.Time
+	CapturedFrom  string          // scanner.CaptureFromEXIF, ...Path, ...Mtime, or "" if unknown
+	Offset        string          // like "+02:00"
+	Kind          extensions.Kind // photo or video; empty if the extension is no longer a known one
+	MimeType      string
+	HasThumb      bool
+	Lat, Lon      *float64
+	Width, Height *int
 }
 
 // MediaQuery is a list request: files captured in [From, To), zero meaning
@@ -97,13 +102,25 @@ func ListMedia(db *statedb.DB, q MediaQuery) (items []MediaItem, next string, er
 	}
 	items = make([]MediaItem, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, MediaItem{
-			SHA256:     r.SHA256,
-			CapturedAt: fromUnixSeconds(r.CapturedAt),
-			Kind:       mediaKind(r),
-			MimeType:   r.MimeType,
-			HasThumb:   preprocess.IsResizable(r.FirstSourcePath),
-		})
+		it := MediaItem{
+			SHA256:       r.SHA256,
+			CapturedAt:   fromUnixSeconds(r.CapturedAt),
+			CapturedFrom: r.CaptureSource.String,
+			Kind:         mediaKind(r),
+			MimeType:     r.MimeType,
+			HasThumb:     preprocess.IsResizable(r.FirstSourcePath),
+		}
+		if zone, ok := offsetZone(r.CaptureOffset.String); ok && it.CapturedFrom == scanner.CaptureFromEXIF {
+			it.CapturedAt, it.Offset = it.CapturedAt.In(zone), r.CaptureOffset.String
+		}
+		if r.Lat.Valid && r.Lon.Valid {
+			it.Lat, it.Lon = &r.Lat.Float64, &r.Lon.Float64
+		}
+		if r.Width.Valid && r.Height.Valid {
+			w, h := int(r.Width.Int64), int(r.Height.Int64)
+			it.Width, it.Height = &w, &h
+		}
+		items = append(items, it)
 	}
 	return items, next, nil
 }
@@ -121,6 +138,16 @@ func mediaKind(r statedb.MediaRow) extensions.Kind {
 		return extensions.KindVideo
 	}
 	return extensions.KindUnknown
+}
+
+// offsetZone turns a recorded offset like "+02:00" into a zone.
+func offsetZone(o string) (*time.Location, bool) {
+	t, err := time.Parse("-07:00", o)
+	if err != nil {
+		return nil, false
+	}
+	_, secs := t.Zone()
+	return time.FixedZone(o, secs), true
 }
 
 func unixSeconds(t time.Time) float64 { return float64(t.UnixNano()) / 1e9 }

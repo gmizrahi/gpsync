@@ -21,11 +21,17 @@ import (
 // See docs/api.md for the contract.
 
 type mediaItemJSON struct {
-	SHA256     string `json:"sha256"`
-	CapturedAt string `json:"captured_at"` // RFC 3339, this machine's time zone
-	Kind       string `json:"kind"`        // "photo", "video", or "" if unknown
-	MimeType   string `json:"mime_type"`
-	HasThumb   bool   `json:"has_thumb"`
+	SHA256       string   `json:"sha256"`
+	CapturedAt   string   `json:"captured_at"`             // RFC 3339: the camera's zone if recorded, else this machine's
+	CapturedFrom string   `json:"captured_from,omitempty"` // "exif", "path", "mtime"; absent if unknown
+	Offset       string   `json:"offset,omitempty"`        // the camera's recorded zone offset
+	Kind         string   `json:"kind"`                    // "photo", "video", or "" if unknown
+	MimeType     string   `json:"mime_type"`
+	HasThumb     bool     `json:"has_thumb"`
+	Lat          *float64 `json:"lat,omitempty"`
+	Lon          *float64 `json:"lon,omitempty"`
+	Width        *int     `json:"width,omitempty"`
+	Height       *int     `json:"height,omitempty"`
 }
 
 type mediaListJSON struct {
@@ -66,11 +72,17 @@ func handleMediaList(w http.ResponseWriter, r *http.Request, db *statedb.DB) {
 	out := mediaListJSON{Items: make([]mediaItemJSON, 0, len(items))}
 	for _, it := range items {
 		out.Items = append(out.Items, mediaItemJSON{
-			SHA256:     it.SHA256,
-			CapturedAt: it.CapturedAt.Format(time.RFC3339),
-			Kind:       string(it.Kind),
-			MimeType:   it.MimeType,
-			HasThumb:   it.HasThumb,
+			SHA256:       it.SHA256,
+			CapturedAt:   it.CapturedAt.Format(time.RFC3339),
+			CapturedFrom: it.CapturedFrom,
+			Offset:       it.Offset,
+			Kind:         string(it.Kind),
+			MimeType:     it.MimeType,
+			HasThumb:     it.HasThumb,
+			Lat:          it.Lat,
+			Lon:          it.Lon,
+			Width:        it.Width,
+			Height:       it.Height,
 		})
 	}
 	if next != "" {

@@ -110,7 +110,9 @@ Lists files by capture time, oldest first. Scope: `read`.
 {
   "items": [
     {"sha256": "1c22…f031", "captured_at": "2024-05-01T09:12:44+02:00",
-     "kind": "photo", "mime_type": "image/jpeg", "has_thumb": true}
+     "captured_from": "exif", "offset": "+02:00",
+     "kind": "photo", "mime_type": "image/jpeg", "has_thumb": true,
+     "lat": 48.8584, "lon": 2.2945, "width": 4032, "height": 3024}
   ],
   "next": "MTcxNDU0…"
 }
@@ -122,6 +124,17 @@ Lists files by capture time, oldest first. Scope: `read`.
   longer recognizes.
 - `has_thumb` says whether the thumbnail endpoint can make one: not for
   videos, nor for HEIC and RAW photos.
+- `captured_from` says where `captured_at` came from: `exif`, `path` or
+  `mtime` (see below). Absent when gpsync can't tell.
+- `offset` is the time-zone offset the camera recorded with the photo's
+  date, when it recorded one.
+- `lat` and `lon` are the photo's GPS position, in decimal degrees, when it
+  has one. A position of exactly 0, 0 is treated as no position: cameras
+  without a fix write zeros.
+- `width` and `height` are the image as displayed, with the EXIF rotation
+  applied, when gpsync can read them: from the image header for JPEG, PNG,
+  GIF and WebP, and from EXIF for TIFF.
+- Every one of these is absent, not `null`, when it isn't known.
 - `next` is `null` on the last page. Pass it back as `cursor` to get the
   following page; paging neither skips nor repeats a file, even when several
   share a capture time.
@@ -129,16 +142,21 @@ Lists files by capture time, oldest first. Scope: `read`.
 Every file gpsync scanned is listed — uploaded or not yet — except files
 that are ignored, waiting for a review decision, or confirmed missing.
 
-**What `captured_at` means.** It's in this machine's time zone, and comes
-from, in order:
+**What `captured_at` means.** It comes from, in order:
 
-1. the photo's EXIF `DateTimeOriginal` (or `DateTime`), read as this
-   machine's local time, since EXIF usually doesn't record a time zone;
-2. a date in the file's path, such as `2024-05-01` or `20240501`, at noon
-   UTC; a bare year means January 1st;
-3. the file's modification time.
+1. `exif`: the photo's EXIF `DateTimeOriginal` (or `DateTime`). When the
+   camera also recorded its offset (`OffsetTimeOriginal`, or `OffsetTime`),
+   it's that instant, shown in that offset, so it reads as the local time
+   where the photo was taken. Otherwise it's read as this machine's local
+   time, and shown in this machine's zone.
+2. `path`: a date in the file's path, such as `2024-05-01` or `20240501`,
+   at noon UTC; a bare year means January 1st.
+3. `mtime`: the file's modification time.
 
-gpsync doesn't record which of these a file's time came from.
+Files gpsync knew before it recorded these get them on the next scan,
+which reads the EXIF and image header of each such file once. A time that
+was changed since (for example by `gpsync fix-dates`) is kept, and its
+`captured_from` is left out.
 
 ### `GET /api/v1/media/{sha256}/thumb`
 

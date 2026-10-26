@@ -83,7 +83,7 @@ func scanCmd() *cobra.Command {
 			reportAutoClean(db)
 
 			overallStart := time.Now()
-			var grandSeen, grandHashed, grandPending int
+			var grandSeen, grandHashed, grandPending, grandMeta int
 			for idx, folder := range units {
 				printFolderHeader(idx+1, len(units), folder)
 				start := time.Now()
@@ -107,10 +107,14 @@ func scanCmd() *cobra.Command {
 				grandSeen += summary.FilesSeen
 				grandHashed += summary.FilesHashed
 				grandPending += summary.NewPending
+				grandMeta += summary.MetadataRead
 			}
 
 			fmt.Printf("Done in %s. %d files seen across %d folders, %d hashed (new/changed), %s newly queued for upload.\n",
 				time.Since(overallStart).Round(time.Second), grandSeen, len(units), grandHashed, colOK(fmt.Sprintf("%d", grandPending)))
+			if grandMeta > 0 {
+				fmt.Printf("Read dates, places and dimensions for %d files already in the ledger (once only).\n", grandMeta)
+			}
 			resolveMissingFiles(db, cfg, false)
 			return nil
 		},

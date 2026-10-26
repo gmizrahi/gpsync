@@ -7,7 +7,7 @@ import (
 )
 
 // datePathMinYear/datePathMaxYear bound which years DateFromPath (and the
-// captureDate fallback that uses it) will accept as a real capture year --
+// ReadMetadata fallback that uses it) will accept as a real capture year --
 // wide enough to cover any genuinely old scanned/digitized photo while
 // still rejecting nonsense (a stray 4-digit number that isn't a year at
 // all, or a corrupted value) that would otherwise produce a wildly wrong
@@ -37,7 +37,7 @@ var (
 // its folder names and/or filename -- for a photo/video library organized
 // by date. It exists because per-year counts came out wrong: investigation
 // against a real library found that
-// scanner.captureDate's filesystem-mtime fallback (used whenever EXIF is
+// scanner.ReadMetadata's filesystem-mtime fallback (used whenever EXIF is
 // missing/unreadable) can drift arbitrarily far from the true capture
 // date -- a file named "2002-07-10-01.jpg" had an mtime of March 2026,
 // almost certainly from a later backup/migration touching the file long

@@ -76,12 +76,12 @@ const statisticsMinPlausibleYear = 1900
 const statisticsYearChartLimit = 25
 
 // yearFromPath is a thin wrapper over scanner.DateFromPath -- the SAME
-// path-date heuristic scanner.captureDate() now tries before falling
+// path-date heuristic scanner.ReadMetadata() now tries before falling
 // back to filesystem mtime (see its own doc comment for the root cause:
 // mtime drifts when a later copy or migration touches a file). Checked
 // BEFORE
 // captured_at in the year chart's own aggregation below, same reasoning
-// as scanner.captureDate's priority: this doesn't rely on `gpsync
+// as scanner.ReadMetadata's priority: this doesn't rely on `gpsync
 // fix-dates` having been run against the already-scanned ledger, so the
 // chart is accurate immediately regardless. Doesn't affect anything
 // stored in the ledger itself (captured_at, Browse's Captured column)

@@ -50,7 +50,7 @@ func FixDates(db *statedb.DB, dryRun bool) (FixDatesSummary, error) {
 		if dryRun {
 			continue
 		}
-		if err := db.UpdateCapturedAt(r.SHA256, float64(t.Unix())); err != nil {
+		if err := db.UpdateCapturedAt(r.SHA256, float64(t.Unix()), scanner.CaptureFromPath); err != nil {
 			return sum, fmt.Errorf("updating capture date for %s: %w", r.Path, err)
 		}
 	}

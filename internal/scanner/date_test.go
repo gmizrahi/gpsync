@@ -104,12 +104,13 @@ func TestCaptureDate_PrefersPathOverMtime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := captureDate(p)
-	if got == nil {
-		t.Fatal("captureDate = nil, want a path-derived date")
+	m := ReadMetadata(p)
+	got := m.CapturedAt
+	if got == nil || m.Source != CaptureFromPath {
+		t.Fatalf("ReadMetadata = %+v, want a path-derived date", m)
 	}
 	gotTime := time.Unix(int64(*got), 0).UTC()
 	if gotTime.Year() != 2002 {
-		t.Errorf("captureDate = %v (year %d), want year 2002 (from the path, not the drifted 2026 mtime)", gotTime, gotTime.Year())
+		t.Errorf("ReadMetadata = %v (year %d), want year 2002 (from the path, not the drifted 2026 mtime)", gotTime, gotTime.Year())
 	}
 }
