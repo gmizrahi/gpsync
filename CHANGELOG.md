@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0]
+
+A local HTTP API, so another program on this PC can show the photos gpsync
+knows: list them by capture time, and fetch a thumbnail or the original of
+each. It answers only on this machine, and only with a token you create.
+
 ### Added
 
 - **An HTTP API for programs on this machine, with API tokens.** A script or
@@ -18,14 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can rotate its own token before it expires, so it never needs a new one
   pasted in. `gpsync tray-quit` now uses the API too, with a token it mints
   for itself, so it still needs no password. See [docs/api.md](docs/api.md).
-  (#67)
+  (#67, #69)
 - **A read-only media API.** A program on this machine can list the photos
   and videos gpsync knows by capture time, and fetch a thumbnail or the
   original of each, to show them in its own pages. Thumbnails are made from
   the local files only when asked for, and cached in a folder you can choose
   (`thumbnail_dir`), even inside your library, which scans then skip. A file
   that changed since it was scanned isn't served until the next scan. See
-  [docs/api.md](docs/api.md). (#66)
+  [docs/api.md](docs/api.md). (#66, #70)
 
 ## [0.4.1]
 
@@ -366,7 +372,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/gmizrahi/gpsync/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/gmizrahi/gpsync/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/gmizrahi/gpsync/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/gmizrahi/gpsync/compare/v0.3.2...v0.3.3
