@@ -7,10 +7,10 @@ import (
 	"net"
 	"net/http"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/gmizrahi/gpsync/internal/config"
 	"github.com/gmizrahi/gpsync/internal/engine"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
@@ -46,9 +46,9 @@ type apiRoute struct {
 // No CSRF check: nothing here is authenticated by anything a browser sends
 // on its own. No CORS headers either, so a page in a browser can't read a
 // response; callers are other programs.
-func apiV1Handler(db *statedb.DB, quit func()) http.Handler {
+func apiV1Handler(db *statedb.DB, quit func(), currentConfig func() config.Config) http.Handler {
 	failures := newLoginAttemptTracker()
-	thumbs := engine.NewThumbCache(filepath.Join(statedb.StateDir, "thumbs"), engine.ThumbCacheMaxBytes)
+	thumbs := engine.NewThumbCache("", engine.ThumbCacheMaxBytes)
 	routes := map[string]apiRoute{
 		"/api/v1/token": {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, _ string) {
 			writeTokenInfo(w, a.Token, "")
@@ -68,7 +68,7 @@ func apiV1Handler(db *statedb.DB, quit func()) http.Handler {
 			handleMediaOriginal(w, r, db)
 		}},
 		mediaThumbRoute: {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
-			handleMediaThumb(w, r, db, thumbs)
+			handleMediaThumb(w, r, db, thumbs, currentConfig())
 		}},
 	}
 

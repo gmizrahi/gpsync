@@ -403,7 +403,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 
 	// Two halves under one anti-framing wrapper: the token API, which never
 	// looks at a cookie, and the dashboard, which never looks at a token.
-	api := apiV1Handler(db, quitGracefully)
+	api := apiV1Handler(db, quitGracefully, wc.Config)
 	dashboard := csrfMiddleware(sessionAuthMiddleware(mux, db, cfg))
 	return frameDenyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isAPIv1(r) {

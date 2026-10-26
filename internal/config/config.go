@@ -182,6 +182,11 @@ type Config struct {
 	// an explicit expiry, and the fresh lifetime each rotation grants:
 	// "90d", "12h", "30m", or "never" (issue #67).
 	APITokenLifetime string `toml:"api_token_lifetime"`
+	// ThumbnailDir is where the media API caches the thumbnails it makes.
+	// Empty means thumbs in gpsync's own state folder. It may be inside a
+	// source folder: scans skip it (scanner.IsIgnoredDir). It may not be a
+	// source folder or contain one -- see engine.ThumbnailDir.
+	ThumbnailDir string `toml:"thumbnail_dir"`
 	// DashboardTLSCertFile/DashboardTLSKeyFile are a certificate and key
 	// the user manages -- mkcert, a home CA, or a real CA. Read in
 	// TLSModeFiles and never written to: regenerating over a key gpsync

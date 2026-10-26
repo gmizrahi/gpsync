@@ -29,6 +29,14 @@ import (
 func ApplyExtensionOverrides(cfg config.Config) {
 	extensions.ApplyUserOverrides(cfg.ExtraSupportedPhotoExtensions, cfg.ExtraSupportedVideoExtensions, cfg.ExtraUnsupportedExtensions)
 	scanner.ApplyUserIgnoreOverrides(cfg.ExtraIgnoredFileNames, cfg.ExtraIgnoredDirNames)
+	// Only a valid one: a thumbnail folder that IS a source folder would
+	// otherwise make scans skip the whole library. An invalid one is never
+	// written to either -- the media API refuses to use it.
+	var ignored []string
+	if dir, err := ThumbnailDir(cfg); err == nil {
+		ignored = append(ignored, dir)
+	}
+	scanner.ApplyIgnoredDirPaths(ignored)
 }
 
 // ApplySettingsForm parses gpsync-tray's settings page submission into an
@@ -208,6 +216,16 @@ func ApplySettingsForm(current config.Config, values url.Values) (config.Config,
 			return current, err
 		}
 		cfg.APITokenLifetime = lifetime
+	}
+
+	if values.Has("thumbnail_dir") {
+		cfg.ThumbnailDir = strings.TrimSpace(values.Get("thumbnail_dir"))
+	}
+	// Checked against this same submission's source folders, so a save can
+	// neither move the thumbnail folder onto the library nor add a source
+	// folder inside the thumbnail folder.
+	if _, err := ThumbnailDir(cfg); err != nil {
+		return current, err
 	}
 
 	tlsMode := strings.TrimSpace(values.Get("dashboard_tls_mode"))

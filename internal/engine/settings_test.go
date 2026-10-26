@@ -280,7 +280,7 @@ func TestApplyExtensionOverrides_InstallsBothTables(t *testing.T) {
 	if got := extensions.Classify("clip.insv"); got != extensions.Unknown {
 		t.Fatalf("precondition failed: Classify(clip.insv) = %q, want Unknown", got)
 	}
-	if scanner.IsIgnoredDirName("MyBackupFolder") {
+	if scanner.IsIgnoredDir("MyBackupFolder") {
 		t.Fatal("precondition failed: MyBackupFolder must not already be ignored")
 	}
 
@@ -293,8 +293,8 @@ func TestApplyExtensionOverrides_InstallsBothTables(t *testing.T) {
 	if got := extensions.Classify("clip.insv"); got != extensions.Supported {
 		t.Errorf("Classify(clip.insv) = %q, want Supported after ApplyExtensionOverrides", got)
 	}
-	if !scanner.IsIgnoredDirName("MyBackupFolder") {
-		t.Error("IsIgnoredDirName(MyBackupFolder) = false, want true after ApplyExtensionOverrides")
+	if !scanner.IsIgnoredDir("MyBackupFolder") {
+		t.Error("IsIgnoredDir(MyBackupFolder) = false, want true after ApplyExtensionOverrides")
 	}
 }
 

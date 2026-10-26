@@ -22,8 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A read-only media API.** A program on this machine can list the photos
   and videos gpsync knows by capture time, and fetch a thumbnail or the
   original of each, to show them in its own pages. Thumbnails are made from
-  the local files and cached. A file that changed since it was scanned isn't
-  served until the next scan. See [docs/api.md](docs/api.md). (#66)
+  the local files only when asked for, and cached in a folder you can choose
+  (`thumbnail_dir`), even inside your library, which scans then skip. A file
+  that changed since it was scanned isn't served until the next scan. See
+  [docs/api.md](docs/api.md). (#66)
 
 ## [0.4.1]
 

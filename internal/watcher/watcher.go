@@ -40,7 +40,7 @@ type Watcher struct {
 
 // New starts watching every directory under each of roots, recursively,
 // and returns once the initial tree walk has added a watch to all of
-// them. Ignored directories (scanner.IsIgnoredDirName -- e.g. Picasa's
+// them. Ignored directories (scanner.IsIgnoredDir -- e.g. Picasa's
 // .picasaoriginals) are skipped entirely, the same exclusion `gpsync scan`
 // already applies, so the watcher doesn't spend a watch handle (a limited
 // resource, especially on Windows) on a tree gpsync would never scan anyway.
@@ -163,7 +163,7 @@ func (w *Watcher) addTree(root string, signalScan bool) error {
 		// collide with an ignore pattern -- the caller asked for it
 		// explicitly. Only entries found DURING the walk are gated,
 		// mirroring scanner.ExpandFolders' own walk.
-		if !(first && d.Name() == rootBase) && scanner.IsIgnoredDirName(d.Name()) {
+		if !(first && d.Name() == rootBase) && scanner.IsIgnoredDir(path) {
 			return filepath.SkipDir
 		}
 		first = false
@@ -231,7 +231,7 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 		// moved in from elsewhere on the volume shows up here as a single
 		// event with no per-file events to follow. addTree therefore also
 		// requests a scan of the folders that already hold files.
-		if ev.Has(fsnotify.Create) && !scanner.IsIgnoredDirName(base) {
+		if ev.Has(fsnotify.Create) && !scanner.IsIgnoredDir(ev.Name) {
 			if err := w.addTree(ev.Name, true); err != nil {
 				w.reportErr(err)
 			}

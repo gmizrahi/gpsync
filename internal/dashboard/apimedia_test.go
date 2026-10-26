@@ -235,3 +235,38 @@ func TestAPIv1Media_ReadScopeAndReadOnly(t *testing.T) {
 		t.Error("a media request changed the ledger")
 	}
 }
+
+// Thumbnails go to the thumbnail_dir setting; an invalid one -- here, the
+// source folder itself -- is refused, and nothing is written anywhere.
+func TestAPIv1Media_ThumbnailsGoToTheConfiguredFolder(t *testing.T) {
+	db := openTestDB(t)
+	lib := t.TempDir()
+	sha := fmt.Sprintf("%064x", 1)
+	addMediaFile(t, db, sha, filepath.Join(lib, "p.jpg"), testJPEG(t, 600, 400), time.Now())
+	tok := newToken(t, db, "viewer")
+
+	ctrl := newFakeController()
+	ctrl.cfg.SourceFolders = []string{lib}
+	ctrl.cfg.ThumbnailDir = filepath.Join(lib, ".thumbnails")
+	srv := newTestServer(t, db, ctrl, Options{})
+	if resp, body := apiGet(t, newTestClient(t), srv.URL+"/api/v1/media/"+sha+"/thumb", tok); resp.StatusCode != http.StatusOK {
+		t.Fatalf("thumb: %d %s", resp.StatusCode, body)
+	}
+	if _, err := os.Stat(filepath.Join(lib, ".thumbnails", "256", sha+".jpg")); err != nil {
+		t.Errorf("not cached in the configured folder: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(statedb.StateDir, "thumbs")); err == nil {
+		t.Error("also cached in the default folder")
+	}
+
+	bad := newFakeController()
+	bad.cfg.SourceFolders = []string{lib}
+	bad.cfg.ThumbnailDir = lib
+	srv = newTestServer(t, db, bad, Options{})
+	if resp, _ := apiGet(t, newTestClient(t), srv.URL+"/api/v1/media/"+sha+"/thumb?size=512", tok); resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("invalid thumbnail folder: %d, want 500", resp.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(lib, "512")); err == nil {
+		t.Error("a thumbnail was written into the source folder")
+	}
+}

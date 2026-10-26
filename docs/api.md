@@ -145,8 +145,17 @@ gpsync doesn't record which of these a file's time came from.
 A JPEG thumbnail. Scope: `read`.
 
 `size` is the long edge in pixels, rounded up to 256, 512 or 1024
-(default 256). Thumbnails are made from the local original on first request
-and cached, within 1 GiB, in `~/.gpsync/thumbs`. A file's thumbnail never
+(default 256). A thumbnail is made from the local original the first time
+it's requested, never in advance, and cached within 1 GiB.
+
+The cache is in `~/.gpsync/thumbs` unless the `thumbnail_dir` setting
+(Settings › API) names another folder. That folder can be inside a source
+folder, such as `D:\Pictures\.thumbnails`. Scans skip it, by its exact
+path, and gpsync marks a dot-named folder it creates as hidden on Windows.
+It can't be a source folder or contain one, since scans would then skip
+your photos. gpsync only reads or removes the files it made there,
+`<size>/<sha256>.jpg`; anything else in the folder is left alone. A file's
+thumbnail never
 changes, so responses carry `Cache-Control: private, max-age=31536000,
 immutable` and an `ETag`; a request with a matching `If-None-Match` gets
 `304`.

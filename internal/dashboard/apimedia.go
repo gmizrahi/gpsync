@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gmizrahi/gpsync/internal/config"
 	"github.com/gmizrahi/gpsync/internal/engine"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
@@ -116,7 +117,7 @@ func cacheForever(w http.ResponseWriter, etag string) {
 }
 
 // handleMediaThumb serves GET /api/v1/media/{sha256}/thumb?size=.
-func handleMediaThumb(w http.ResponseWriter, r *http.Request, db *statedb.DB, thumbs *engine.ThumbCache) {
+func handleMediaThumb(w http.ResponseWriter, r *http.Request, db *statedb.DB, thumbs *engine.ThumbCache, cfg config.Config) {
 	sha, ok := mediaSHA(w, r)
 	if !ok {
 		return
@@ -130,6 +131,13 @@ func handleMediaThumb(w http.ResponseWriter, r *http.Request, db *statedb.DB, th
 		}
 	}
 	size = engine.SnapThumbSize(size)
+	dir, err := engine.ThumbnailDir(cfg)
+	if err != nil {
+		log.Printf("api: no thumbnails: %v", err)
+		http.Error(w, "the thumbnail folder setting is invalid; see Settings", http.StatusInternalServerError)
+		return
+	}
+	thumbs.UseDir(dir)
 	_, path, ok := locateOrFail(w, r, db, sha)
 	if !ok {
 		return
