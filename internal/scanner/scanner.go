@@ -540,8 +540,7 @@ func ScanFolders(db *statedb.DB, patterns []string, runType string, concurrency 
 		if err != nil {
 			return summary, err
 		}
-		mtime := float64(res.info.ModTime().UnixNano()) / 1e9
-		if seen != nil && seen.Mtime == mtime && seen.Size == res.info.Size() {
+		if seen != nil && seen.Unchanged(res.info) {
 			cacheHits = append(cacheHits, seen)
 			continue
 		}

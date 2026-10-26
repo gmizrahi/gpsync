@@ -135,7 +135,7 @@ Every command has `--help` with examples. Full reference:
 - [Configuration](docs/configuration.md) — every `config.toml` setting
 - [Commands](docs/commands.md) — full command reference
 - [Dashboard](docs/dashboard.md) — the tray app and web UI
-- [HTTP API](docs/api.md) — tokens and endpoints for local programs
+- [HTTP API](docs/api.md) — tokens, and read-only access to your media, for local programs
 - [Troubleshooting](docs/troubleshooting.md) — throttling, quota, stuck files
 - [Limitations](docs/limitations.md) — what the Google Photos API cannot do
 - [Security](SECURITY.md) · [Privacy](PRIVACY.md)

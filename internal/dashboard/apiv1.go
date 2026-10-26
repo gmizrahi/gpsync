@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -47,6 +48,7 @@ type apiRoute struct {
 // response; callers are other programs.
 func apiV1Handler(db *statedb.DB, quit func()) http.Handler {
 	failures := newLoginAttemptTracker()
+	thumbs := engine.NewThumbCache(filepath.Join(statedb.StateDir, "thumbs"), engine.ThumbCacheMaxBytes)
 	routes := map[string]apiRoute{
 		"/api/v1/token": {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, _ string) {
 			writeTokenInfo(w, a.Token, "")
@@ -59,10 +61,20 @@ func apiV1Handler(db *statedb.DB, quit func()) http.Handler {
 		"/api/v1/control/quit": {http.MethodPost, engine.ScopeControl, func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, _ string) {
 			serveQuit(w, quit)
 		}},
+		"/api/v1/media": {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
+			handleMediaList(w, r, db)
+		}},
+		mediaItemRoute: {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
+			handleMediaOriginal(w, r, db)
+		}},
+		mediaThumbRoute: {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
+			handleMediaThumb(w, r, db, thumbs)
+		}},
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if !fromLoopback(r) {
 			http.Error(w, "the API answers on this machine only", http.StatusForbidden)
 			return
@@ -106,7 +118,8 @@ func apiV1Handler(db *statedb.DB, quit func()) http.Handler {
 			return
 		}
 
-		route, found := routes[r.URL.Path]
+		key, sha := apiRouteKey(r.URL.Path)
+		route, found := routes[key]
 		if !found || path.Clean(r.URL.Path) != r.URL.Path {
 			http.NotFound(w, r)
 			return
@@ -121,8 +134,36 @@ func apiV1Handler(db *statedb.DB, quit func()) http.Handler {
 			http.Error(w, "this token lacks the "+route.scope+" scope", http.StatusForbidden)
 			return
 		}
+		if sha != "" {
+			r.SetPathValue("sha256", sha)
+		}
 		route.handler(w, r, a, presented)
 	})
+}
+
+const (
+	mediaItemRoute  = "/api/v1/media/{sha256}"
+	mediaThumbRoute = "/api/v1/media/{sha256}/thumb"
+)
+
+// apiRouteKey maps a request path to its key in the route table, and returns
+// the {sha256} segment of a per-file route. The segment is passed on as
+// sent; the handlers refuse one that isn't a content hash with 400.
+func apiRouteKey(p string) (key, sha string) {
+	rest, ok := strings.CutPrefix(p, "/api/v1/media/")
+	if !ok || rest == "" {
+		return p, ""
+	}
+	sha, sub, _ := strings.Cut(rest, "/")
+	switch sub {
+	case "":
+		// ".../{sha256}/" lands here too, and is refused by the router's
+		// path.Clean check.
+		return mediaItemRoute, sha
+	case "thumb":
+		return mediaThumbRoute, sha
+	}
+	return p, ""
 }
 
 // fromLoopback reports whether the request came from this machine. The
