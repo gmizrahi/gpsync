@@ -52,6 +52,7 @@ func TestWithin(t *testing.T) {
 		{false, root + sep + ".." + sep + "Other", false},
 		{false, sep + "Pictures2", false},
 		{false, sep, false},
+		{false, root + sep + "Trip", true},
 		{false, sep + "pictures" + sep + "Trip", false},
 		{true, sep + "pictures" + sep + "Trip", true},
 		{false, root + sep + "..foo", true}, // a name that starts with dots is still inside
@@ -60,6 +61,9 @@ func TestWithin(t *testing.T) {
 		caseInsensitive = tc.insensitive
 		if got := Within(tc.p, root); got != tc.want {
 			t.Errorf("Within(%q, %q) with case-insensitive=%v = %v, want %v", tc.p, root, tc.insensitive, got, tc.want)
+		}
+		if !Within(tc.p, sep) {
+			t.Errorf("Within(%q, %q) = false; everything is within the root", tc.p, sep)
 		}
 		caseInsensitive = restore
 	}
