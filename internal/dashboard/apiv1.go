@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,9 +30,10 @@ func isAPIv1(r *http.Request) bool {
 // apiRoute is one /api/v1 endpoint: the method it accepts, the scope it
 // requires, and the handler, which receives the authenticated token.
 type apiRoute struct {
-	method  string
-	scope   string
-	handler func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, presented string)
+	method   string
+	scope    string
+	endpoint string // what usage is counted as (#76)
+	handler  func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, presented string)
 }
 
 // apiV1Handler serves /api/v1. Every request is, in order:
@@ -46,33 +48,39 @@ type apiRoute struct {
 // No CSRF check: nothing here is authenticated by anything a browser sends
 // on its own. No CORS headers either, so a page in a browser can't read a
 // response; callers are other programs.
-func apiV1Handler(db *statedb.DB, quit func(), currentConfig func() config.Config) http.Handler {
+func apiV1Handler(db *statedb.DB, quit func(), currentConfig func() config.Config, usage *engine.APIUsageCounter) http.Handler {
 	failures := newLoginAttemptTracker()
 	thumbs := engine.NewThumbCache("", engine.ThumbCacheMaxBytes)
 	routes := map[string]apiRoute{
-		"/api/v1/token": {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, _ string) {
+		"/api/v1/token": {http.MethodGet, engine.ScopeRead, engine.APIEndpointToken, func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, _ string) {
 			writeTokenInfo(w, a.Token, "")
 		}},
-		"/api/v1/token/rotate": {http.MethodPost, "", func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, presented string) {
+		"/api/v1/token/rotate": {http.MethodPost, "", engine.APIEndpointRotate, func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, presented string) {
 			// No scope: rotating is something a token may always do to
 			// itself, whatever it is otherwise allowed to do.
 			handleRotate(w, db, a, presented)
 		}},
-		"/api/v1/control/quit": {http.MethodPost, engine.ScopeControl, func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, _ string) {
+		"/api/v1/control/quit": {http.MethodPost, engine.ScopeControl, engine.APIEndpointControl, func(w http.ResponseWriter, r *http.Request, a engine.Authenticated, _ string) {
 			serveQuit(w, quit)
 		}},
-		"/api/v1/media": {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
+		"/api/v1/media": {http.MethodGet, engine.ScopeRead, engine.APIEndpointList, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
 			handleMediaList(w, r, db)
 		}},
-		mediaItemRoute: {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
+		mediaItemRoute: {http.MethodGet, engine.ScopeRead, engine.APIEndpointOriginal, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
 			handleMediaOriginal(w, r, db)
 		}},
-		mediaThumbRoute: {http.MethodGet, engine.ScopeRead, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
+		mediaThumbRoute: {http.MethodGet, engine.ScopeRead, engine.APIEndpointThumb, func(w http.ResponseWriter, r *http.Request, _ engine.Authenticated, _ string) {
 			handleMediaThumb(w, r, db, thumbs, currentConfig())
 		}},
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		// Every request is counted, whichever way it ends: by token name
+		// ('' until one authenticates), endpoint and result (#76).
+		w := &usageWriter{ResponseWriter: rw}
+		endpoint, tokenName := engine.APIEndpointOther, ""
+		defer func() { usage.Record(db, tokenName, endpoint, w.result(), w.bytes) }()
+
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if !fromLoopback(r) {
@@ -118,12 +126,17 @@ func apiV1Handler(db *statedb.DB, quit func(), currentConfig func() config.Confi
 			return
 		}
 
+		tokenName = a.Token.Name
+		if a.Token.Ephemeral {
+			tokenName = engine.APIUsageCLIName
+		}
 		key, sha := apiRouteKey(r.URL.Path)
 		route, found := routes[key]
 		if !found || path.Clean(r.URL.Path) != r.URL.Path {
 			http.NotFound(w, r)
 			return
 		}
+		endpoint = route.endpoint
 		if r.Method != route.method {
 			w.Header().Set("Allow", route.method)
 			http.Error(w, route.method+" only", http.StatusMethodNotAllowed)
@@ -164,6 +177,64 @@ func apiRouteKey(p string) (key, sha string) {
 		return mediaThumbRoute, sha
 	}
 	return p, ""
+}
+
+// usageWriter notes a response's status and size for the usage count. A
+// thumbnail handler also notes whether it came from the cache
+// (noteThumbSource), which the status alone can't say.
+type usageWriter struct {
+	http.ResponseWriter
+	status    int
+	bytes     int64
+	thumbFrom string
+}
+
+func (u *usageWriter) WriteHeader(code int) {
+	if u.status == 0 {
+		u.status = code
+	}
+	u.ResponseWriter.WriteHeader(code)
+}
+
+func (u *usageWriter) Write(b []byte) (int, error) {
+	if u.status == 0 {
+		u.status = http.StatusOK
+	}
+	n, err := u.ResponseWriter.Write(b)
+	u.bytes += int64(n)
+	return n, err
+}
+
+// Flush passes through, for serveQuit's answer-before-quitting.
+func (u *usageWriter) Flush() {
+	if f, ok := u.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// result is what the request is counted as: a status code for a refusal,
+// otherwise ok -- or, for a thumbnail, where it came from.
+func (u *usageWriter) result() string {
+	switch {
+	case u.status == http.StatusNotModified:
+		return engine.APIResultUnchanged
+	case u.status >= 400:
+		return strconv.Itoa(u.status)
+	case u.thumbFrom != "":
+		return u.thumbFrom
+	}
+	return engine.APIResultOK
+}
+
+// noteThumbSource records, for the usage count, whether a thumbnail came
+// from the cache or was made for this request.
+func noteThumbSource(w http.ResponseWriter, fromCache bool) {
+	if u, ok := w.(*usageWriter); ok {
+		u.thumbFrom = engine.APIResultMade
+		if fromCache {
+			u.thumbFrom = engine.APIResultCache
+		}
+	}
 }
 
 // fromLoopback reports whether the request came from this machine. The

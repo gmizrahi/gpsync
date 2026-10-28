@@ -198,6 +198,22 @@ answers `404` until the next scan. An edited file then gets a new
 
 Nothing under `/api/v1/media` changes gpsync's database.
 
+## Usage
+
+Statistics, in the dashboard, has an **API usage** card once any token
+exists, and `gpsync stats --api` prints the same. It shows:
+
+- requests by token;
+- what was served: list pages, thumbnails (from the cache, made for the
+  request, or unchanged for a client that already had them) and originals,
+  with sizes;
+- refused requests by reason;
+- how full the thumbnail cache is.
+
+It counts what *kind* of thing was served, never which files. Counts are
+kept per day for 90 days, and a running tray saves them to its database
+about once a minute.
+
 ## Errors
 
 | Status | Meaning |

@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -38,6 +39,19 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 	markJob := newMarkSyncedJob()
 
 	cfg := wc.Config()
+
+	// API usage (#76) is counted in memory and saved about once a minute;
+	// a graceful quit saves what's left first.
+	usage := engine.NewAPIUsageCounter()
+	quit := quitGracefully
+	if quit != nil {
+		quit = func() {
+			if err := usage.Flush(db); err != nil {
+				log.Printf("api: saving usage counts failed: %v", err)
+			}
+			quitGracefully()
+		}
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +157,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
 			return
 		}
-		serveQuit(w, quitGracefully)
+		serveQuit(w, quit)
 	})
 	mux.HandleFunc("/api/skip-file", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -212,7 +226,10 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 		// client-side state to get out of sync with what's displayed, and
 		// each view is a shareable, bookmarkable URL.
 		activity := engine.ParseActivityGranularity(r.URL.Query().Get("activity"))
-		page, err := renderStatisticsPage(db, wc.Config().Theme, wc.Config().DashboardAuthEnabled, activity,
+		if err := usage.Flush(db); err != nil {
+			log.Printf("api: saving usage counts failed: %v", err)
+		}
+		page, err := renderStatisticsPage(db, wc.Config(), activity, engine.ParseAPIUsagePeriod(r.URL.Query().Get("api")),
 			r.URL.Query().Get("fixed"), r.URL.Query().Get("error"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -403,7 +420,7 @@ func Handler(db *statedb.DB, wc Controller, opts Options) http.Handler {
 
 	// Two halves under one anti-framing wrapper: the token API, which never
 	// looks at a cookie, and the dashboard, which never looks at a token.
-	api := apiV1Handler(db, quitGracefully, wc.Config)
+	api := apiV1Handler(db, quit, wc.Config, usage)
 	dashboard := csrfMiddleware(sessionAuthMiddleware(mux, db, cfg))
 	return frameDenyMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isAPIv1(r) {

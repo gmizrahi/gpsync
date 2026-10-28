@@ -157,6 +157,24 @@ Show failed uploads and their errors.
 
 Show the file extensions seen and how their uploads went.
 
+### `gpsync stats`
+
+Summarise the library: totals, media types, extensions, years.
+
+Prints what the dashboard's Statistics page shows. Reads the ledger only.
+
+With `--api`, it prints the page's API usage instead: requests by token, what was served, refusals and the thumbnail cache. A running tray saves its counts about once a minute, so the last minute may not show yet.
+
+```sh
+gpsync stats
+gpsync stats --api --days 7
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--api` | Show [API](api.md) usage instead of library statistics |
+| `--days` | With `--api`: the period, `7`, `30` (default) or `90` days |
+
 ### `gpsync whatis`
 
 Identify a file by its content.

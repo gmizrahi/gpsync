@@ -3,6 +3,7 @@ package units
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestBytes pins both halves of the request: KB/MB/GB/TB labels, and the
@@ -38,6 +39,24 @@ func TestBytes_NoBinaryPrefixes(t *testing.T) {
 	for n := int64(1); n > 0 && n < int64(1)<<62; n *= 7 {
 		if got := Bytes(n); strings.Contains(got, "iB") {
 			t.Fatalf("Bytes(%d) = %q -- binary-prefix labels (KiB/MiB/GiB/TiB) were replaced by KB/MB/GB/TB on request", n, got)
+		}
+	}
+}
+
+func TestRelative(t *testing.T) {
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	for d, want := range map[time.Duration]string{
+		-30 * time.Second:   "just now",
+		-time.Minute:        "1 minute ago",
+		-5 * time.Minute:    "5 minutes ago",
+		-2 * time.Hour:      "2 hours ago",
+		-47 * time.Hour:     "47 hours ago",
+		-72 * time.Hour:     "3 days ago",
+		41 * 24 * time.Hour: "in 41 days",
+		90 * time.Minute:    "in 1 hour",
+	} {
+		if got := Relative(now.Add(d), now); got != want {
+			t.Errorf("Relative(%v) = %q, want %q", d, got, want)
 		}
 	}
 }
