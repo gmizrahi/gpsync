@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0]
+
+Statistics now shows how the local API is used: requests by program, what
+was served, and refused requests. The dashboard's light and dark themes
+are now defined in one place.
+
 ### Added
 
 - **API usage on Statistics.** Once an API token exists, a card near the
@@ -23,7 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `light-dark()`, instead of in up to four places. It looks the same in
   every theme. Native controls and scrollbars now follow the chosen theme
   too. It needs a browser from mid-2024 or later (Chrome/Edge 123, Firefox
-  120, Safari 17.5); the tray's own window keeps itself current. (#77)
+  120, Safari 17.5); the tray's own window keeps itself current. (#77, #80)
+- **Dependencies:** `golang.org/x/image` 0.47.0 and `modernc.org/sqlite`
+  1.61.0 (SQLite 3.54.1). (#78)
 
 ## [0.6.0]
 
@@ -420,7 +428,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/gmizrahi/gpsync/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gmizrahi/gpsync/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gmizrahi/gpsync/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/gmizrahi/gpsync/compare/v0.4.0...v0.4.1
