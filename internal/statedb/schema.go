@@ -188,6 +188,22 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     ephemeral INTEGER NOT NULL DEFAULT 0
 );
 
+-- api_usage counts the HTTP API's requests (issue #76): one row per local
+-- day, token name, endpoint and result, with how many bytes the responses
+-- carried. What KIND of thing was served, never which file -- a per-file
+-- access log would record which pictures a program looked at, and these
+-- numbers don't need one. token_name is '' for requests no valid token
+-- authenticated. Kept for 90 days (PruneAPIUsage).
+CREATE TABLE IF NOT EXISTS api_usage (
+    day TEXT NOT NULL,
+    token_name TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    result TEXT NOT NULL,
+    requests INTEGER NOT NULL,
+    bytes INTEGER NOT NULL,
+    PRIMARY KEY (day, token_name, endpoint, result)
+);
+
 CREATE TABLE IF NOT EXISTS dashboard_sessions (
     token TEXT PRIMARY KEY,
     created_at REAL NOT NULL,

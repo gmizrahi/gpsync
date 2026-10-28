@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -257,10 +256,7 @@ func TestPrintRunAborted_ExplainsWhatHappenedAndWhatToDo(t *testing.T) {
 // openInfoTestDB points statedb at an isolated temp dir and opens it.
 func openInfoTestDB(t *testing.T) *statedb.DB {
 	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("GPSYNC_STATE_DIR", dir)
-	statedb.StateDir = dir
-	statedb.StateDBPath = filepath.Join(dir, "state.sqlite")
+	isolateState(t)
 	db, err := statedb.Open()
 	if err != nil {
 		t.Fatal(err)

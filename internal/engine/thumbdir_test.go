@@ -95,7 +95,7 @@ func TestThumbCache_EvictsOnlyItsOwnFiles(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		p := filepath.Join(src, "p.jpg")
 		writeTestJPEG(t, p, 300, 200)
-		if _, err := c.Thumbnail(testSHA(i), p, 256); err != nil {
+		if _, _, err := c.Thumbnail(testSHA(i), p, 256); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -115,11 +115,11 @@ func TestThumbCache_UseDirMovesIt(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "p.jpg")
 	writeTestJPEG(t, p, 300, 200)
 	c := NewThumbCache(a, 1<<30)
-	if _, err := c.Thumbnail(testSHA(1), p, 256); err != nil {
+	if _, _, err := c.Thumbnail(testSHA(1), p, 256); err != nil {
 		t.Fatal(err)
 	}
 	c.UseDir(b)
-	if _, err := c.Thumbnail(testSHA(2), p, 256); err != nil {
+	if _, _, err := c.Thumbnail(testSHA(2), p, 256); err != nil {
 		t.Fatal(err)
 	}
 	for f, want := range map[string]bool{

@@ -518,6 +518,11 @@
   table.stats td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
   table.stats tr:last-child td { border-bottom: none; }
   table.stats td.name { font-family: ui-monospace, Consolas, monospace; }
+  /* API usage card (#76): rows that are words, not file extensions or
+     token names, and the indented breakdown under Thumbnails. */
+  table.stats td.text { font-family: inherit; }
+  table.stats td.sub { padding-left: 1.4rem; color: var(--text-dim); }
+  .bar.bar-wide { display: block; width: 100%; margin: 0.35rem 0 0; }
   .mini-bar-track { display: inline-block; width: 6rem; height: 0.45rem; background: var(--bg-input); border-radius: 3px; overflow: hidden; vertical-align: middle; margin-right: 0.6rem; }
   .mini-bar-fill { display: block; height: 100%; background: var(--info); }
   .year-chart { display: flex; align-items: flex-end; gap: 0.35rem; height: 9.5rem; margin: 1.6rem 0 0.3rem; }

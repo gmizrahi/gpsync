@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,10 +118,7 @@ func TestTrayQuit_FallsBackToTheOldRouteForAnOlderTray(t *testing.T) {
 // only a refused connection means that. Reporting the comforting answer for
 // the wrong reason would leave a running tray running.
 func TestTrayQuit_ALedgerFailureIsAnErrorNotNotRunning(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GPSYNC_STATE_DIR", dir)
-	statedb.StateDir = dir
-	statedb.StateDBPath = filepath.Join(dir, "state.sqlite")
+	isolateState(t)
 	cfg := config.Defaults()
 	cfg.DashboardPort = 1
 	if err := config.Save(cfg); err != nil {

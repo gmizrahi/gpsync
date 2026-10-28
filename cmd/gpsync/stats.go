@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"time"
 
+	"github.com/gmizrahi/gpsync/internal/config"
 	"github.com/gmizrahi/gpsync/internal/engine"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 	"github.com/gmizrahi/gpsync/internal/units"
@@ -10,22 +13,43 @@ import (
 )
 
 func statsCmd() *cobra.Command {
-	return &cobra.Command{
+	var apiUsage bool
+	var apiDays int
+	cmd := &cobra.Command{
 		Use:   "stats",
 		Short: "Summarise the library: totals, media types, extensions, years",
 		Long: "Prints what the dashboard's Statistics page shows: totals, a breakdown by media type and extension, and capture years.\n" +
 			"\n" +
 			"Reads the ledger only; it does not touch Google or walk your folders.\n" +
 			"\n" +
+			"With --api, prints the Statistics page's API usage instead: requests by token, what was served, refusals and the thumbnail cache. A running tray saves its counts about once a minute, so the last minute may not show yet.\n" +
+			"\n" +
 			"Examples:\n" +
-			"  gpsync stats",
+			"  gpsync stats\n" +
+			"  gpsync stats --api --days 7",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if apiUsage && engine.ParseAPIUsagePeriod(strconv.Itoa(apiDays)) != apiDays {
+				return fmt.Errorf("--days must be 7, 30 or 90 (got %d)", apiDays)
+			}
 			db, err := statedb.Open()
 			if err != nil {
 				return err
 			}
 			defer db.Close()
+
+			if apiUsage {
+				cfg, err := config.Load()
+				if err != nil {
+					return err
+				}
+				r, hasTokens, err := engine.BuildAPIUsageReport(db, cfg, apiDays, time.Now())
+				if err != nil {
+					return err
+				}
+				printAPIUsage(r, hasTokens, time.Now())
+				return nil
+			}
 
 			s, err := engine.BuildStatistics(db)
 			if err != nil {
@@ -34,6 +58,76 @@ func statsCmd() *cobra.Command {
 			printStats(s)
 			return nil
 		},
+	}
+	cmd.Flags().BoolVar(&apiUsage, "api", false, "Show API usage instead of library statistics")
+	cmd.Flags().IntVar(&apiDays, "days", 30, "With --api: the period, 7, 30 or 90 days")
+	return cmd
+}
+
+func printAPIUsage(r engine.APIUsageReport, hasTokens bool, now time.Time) {
+	fmt.Println(colHeader(fmt.Sprintf("API usage, last %d days", r.Days)))
+	if !hasTokens {
+		fmt.Println(colDim("No API tokens. Create one with `gpsync token create --name NAME`."))
+		return
+	}
+	last := "never"
+	if !r.LastRequest.IsZero() {
+		last = units.Relative(r.LastRequest, now)
+	}
+	fmt.Printf("  Requests:      %d\n", r.Requests)
+	fmt.Printf("  Served:        %s\n", units.Bytes(r.Bytes))
+	fmt.Printf("  Refused:       %d\n", r.Refused)
+	fmt.Printf("  Last request:  %s\n", last)
+
+	fmt.Println()
+	fmt.Println(colHeader("By token"))
+	for _, t := range r.Tokens {
+		used, expires := "never", "never"
+		if !t.LastUsed.IsZero() {
+			used = units.Relative(t.LastUsed, now)
+		}
+		switch {
+		case !t.Stored:
+			used, expires = "-", "-"
+		case !t.ExpiresAt.IsZero() && !t.ExpiresAt.After(now):
+			expires = "expired"
+		case !t.ExpiresAt.IsZero():
+			expires = units.Relative(t.ExpiresAt, now)
+		}
+		fmt.Printf("  %-20s %8d request(s)   last used %-14s expires %s\n", t.Name, t.Requests, used, expires)
+	}
+
+	fmt.Println()
+	fmt.Println(colHeader("What was served"))
+	if len(r.Served) == 0 {
+		fmt.Println(colDim("  Nothing served in this period."))
+	}
+	for _, s := range r.Served {
+		label := s.Label
+		if s.Sub {
+			label = "  " + label
+		}
+		size := units.Bytes(s.Bytes)
+		if s.Bytes == 0 {
+			size = "-"
+		}
+		fmt.Printf("  %-32s %8d   %10s\n", label, s.Requests, size)
+	}
+
+	fmt.Println()
+	fmt.Println(colHeader("Thumbnail cache"))
+	if r.CacheErr != nil {
+		fmt.Printf("  Thumbnail folder setting is invalid: %v\n", r.CacheErr)
+	} else {
+		fmt.Printf("  %s: %s of %s\n", r.CacheDir, units.Bytes(r.CacheBytes), units.Bytes(r.CacheMax))
+	}
+
+	if len(r.Refusals) > 0 {
+		fmt.Println()
+		fmt.Println(colHeader("Refused"))
+		for _, f := range r.Refusals {
+			fmt.Printf("  %-56s %8d\n", f.Label(), f.Requests)
+		}
 	}
 }
 

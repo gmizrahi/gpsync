@@ -467,7 +467,7 @@ func TestRenderStatisticsPage_ByMediaType(t *testing.T) {
 	mustNoErr(t, db.MarkUploaded("p-done", "m1", ""))
 	mustNoErr(t, db.EnsurePending("v-todo", 8000, "video/mp4", "/lib/c.mp4", nil))
 
-	page, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily, "", "")
+	page, err := renderStatisticsPage(db, statsTestConfig(), engine.ActivityDaily, 30, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -725,7 +725,7 @@ func TestRenderStatisticsPage_ActivityChartsAndSelector(t *testing.T) {
 		{engine.ActivityMonthly, 12, "Last 12 months."},
 	}
 	for _, c := range cases {
-		page, err := renderStatisticsPage(db, config.ThemeDark, false, c.gran, "", "")
+		page, err := renderStatisticsPage(db, statsTestConfig(), c.gran, 30, "", "")
 		if err != nil {
 			t.Fatalf("%s: %v", c.gran, err)
 		}
@@ -777,7 +777,7 @@ func TestRenderStatisticsPage_BackupProgressCard(t *testing.T) {
 	mustNoErr(t, db.MarkUploaded("h-done", "media-a", ""))
 	mustNoErr(t, db.EnsurePending("h-todo", 4096, "image/jpeg", "/lib/b.jpg", nil))
 
-	page, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily, "", "")
+	page, err := renderStatisticsPage(db, statsTestConfig(), engine.ActivityDaily, 30, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +801,7 @@ func TestRenderStatisticsPage_BackupProgress_NoThroughput_ShowsNoEstimate(t *tes
 	db := openTestDB(t)
 	mustNoErr(t, db.EnsurePending("h-only", 4096, "image/jpeg", "/lib/c.jpg", nil))
 
-	page, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily, "", "")
+	page, err := renderStatisticsPage(db, statsTestConfig(), engine.ActivityDaily, 30, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -999,7 +999,7 @@ func TestPages_UseKBMBGBLabels(t *testing.T) {
 	mustNoErr(t, db.EnsurePending("h-video", 5<<30, "video/mp4", "/lib/b.mp4", nil))
 	mustNoErr(t, db.MarkUploaded("h-photo", "m1", ""))
 
-	stats, err := renderStatisticsPage(db, config.ThemeDark, false, engine.ActivityDaily, "", "")
+	stats, err := renderStatisticsPage(db, statsTestConfig(), engine.ActivityDaily, 30, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1017,4 +1017,11 @@ func TestPages_UseKBMBGBLabels(t *testing.T) {
 	if !strings.Contains(stats, "GB") {
 		t.Error("statistics page shows no GB figure at all for a 5GB library -- the check above would pass vacuously")
 	}
+}
+
+// statsTestConfig is the config the Statistics tests render with.
+func statsTestConfig() config.Config {
+	cfg := config.Defaults()
+	cfg.Theme = config.ThemeDark
+	return cfg
 }

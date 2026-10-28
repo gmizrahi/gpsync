@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **API usage on Statistics.** Once an API token exists, a card near the
+  bottom of Statistics shows the API's requests by token, what was served
+  (list pages, thumbnails from the cache or made for the request,
+  originals) with sizes, refusals by reason, and how full the thumbnail
+  cache is, over 7, 30 or 90 days. `gpsync stats --api` prints the same. It
+  counts what kind of thing was served, never which files, and keeps 90
+  days. (#76)
+
 ## [0.6.0]
 
 The media API now says where and when a photo was taken: its GPS position,

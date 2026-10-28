@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gmizrahi/gpsync/internal/config"
 	"github.com/gmizrahi/gpsync/internal/engine"
 	"github.com/gmizrahi/gpsync/internal/statedb"
 )
@@ -173,6 +174,12 @@ type statisticsPageData struct {
 	// other than a terminal.
 	ThrottleRungs      []statThrottleRow
 	ThrottleEventCount int
+
+	// API backs the "API usage" card (#76): nil, and the card hidden,
+	// until an API token exists. APIQuery keeps its period on the
+	// activity tabs' links.
+	API      *apiUsageView
+	APIQuery template.URL // "&api=N", built here from a number: not escaped
 }
 
 // statThrottleRow is one row of the Throttle recovery table -- rung
@@ -255,7 +262,7 @@ func activityBar(label, value, title string, v, max float64) statActivityBar {
 	}
 }
 
-func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activity engine.ActivityGranularity, msg, errMsg string) (string, error) {
+func renderStatisticsPage(db *statedb.DB, cfg config.Config, activity engine.ActivityGranularity, apiDays int, msg, errMsg string) (string, error) {
 	s, err := engine.BuildStatistics(db)
 	if err != nil {
 		return "", err
@@ -476,11 +483,20 @@ func renderStatisticsPage(db *statedb.DB, theme string, authEnabled bool, activi
 		}
 	}
 
+	// Best-effort like the throttle card: a failure here hides this card,
+	// it doesn't stop the page.
+	if report, hasTokens, err := engine.BuildAPIUsageReport(db, cfg, apiDays, time.Now()); err == nil && hasTokens {
+		data.API = buildAPIUsageView(report, activity, time.Now())
+	}
+	if apiDays != engine.ParseAPIUsagePeriod("") {
+		data.APIQuery = template.URL(fmt.Sprintf("&api=%d", apiDays)) // #nosec G203 -- from an int, not request text
+	}
+
 	var buf strings.Builder
 	if err := statisticsTmpl.Execute(&buf, data); err != nil {
 		return "", err
 	}
-	return pageShell(db, "Statistics", "statistics", buf.String(), theme, authEnabled), nil
+	return pageShell(db, "Statistics", "statistics", buf.String(), cfg.Theme, cfg.DashboardAuthEnabled), nil
 }
 
 var statisticsTmpl = template.Must(template.New("statistics").Parse(`
@@ -538,9 +554,9 @@ var statisticsTmpl = template.Must(template.New("statistics").Parse(`
 <div class="card">
   <h2>Uploaded over time</h2>
   <div class="chart-tabs">
-    <a href="/statistics?activity=daily"{{if .ActivityIsDaily}} class="active"{{end}}>Daily</a>
-    <a href="/statistics?activity=weekly"{{if .ActivityIsWeekly}} class="active"{{end}}>Weekly</a>
-    <a href="/statistics?activity=monthly"{{if .ActivityIsMonthly}} class="active"{{end}}>Monthly</a>
+    <a href="/statistics?activity=daily{{$.APIQuery}}"{{if .ActivityIsDaily}} class="active"{{end}}>Daily</a>
+    <a href="/statistics?activity=weekly{{$.APIQuery}}"{{if .ActivityIsWeekly}} class="active"{{end}}>Weekly</a>
+    <a href="/statistics?activity=monthly{{$.APIQuery}}"{{if .ActivityIsMonthly}} class="active"{{end}}>Monthly</a>
   </div>
   <div class="chart-caption">Files</div>
   <div class="year-chart{{if .ActivityDense}} year-chart-dense{{end}}">
@@ -589,6 +605,47 @@ var statisticsTmpl = template.Must(template.New("statistics").Parse(`
   </div>
 </div>
 {{if .ExtTableNote}}<div class="hint" style="margin:-0.5rem 0 1rem;">{{.ExtTableNote}}</div>{{end}}
+
+{{with .API}}
+<div class="card" id="api-usage">
+  <h2>API usage</h2>
+  <div class="chart-tabs" style="margin-bottom:1rem;">
+    {{range .Periods}}<a href="{{.Href}}"{{if .Active}} class="active"{{end}}>{{.Label}}</a>{{end}}
+  </div>
+  <div class="stats-grid">
+    <div class="stat"><div class="n">{{.Requests}}</div><div class="l">Requests</div></div>
+    <div class="stat"><div class="n">{{.Served}}</div><div class="l">Served</div></div>
+    <div class="stat"><div class="n">{{.Refused}}</div><div class="l">Refused</div></div>
+    <div class="stat"><div class="n">{{.LastRequest}}</div><div class="l">Last request</div></div>
+  </div>
+  <div class="status-columns" style="margin-top:0.4rem;">
+    <div>
+      <div class="chart-caption">By token</div>
+      <div class="table-wrap"><table class="stats"><thead><tr><th>Token</th><th class="num">Requests</th><th class="num">Last used</th><th class="num">Expires</th></tr></thead><tbody>
+        {{range .Tokens}}<tr><td class="name">{{.Name}}</td><td class="num">{{.Requests}}</td><td class="num">{{.LastUsed}}</td><td class="num">{{.Expires}}</td></tr>{{end}}
+      </tbody></table></div>
+    </div>
+    <div>
+      <div class="chart-caption">What was served</div>
+      {{if .ServedRows}}<div class="table-wrap"><table class="stats"><thead><tr><th>Request</th><th class="num">Count</th><th class="num">Size</th></tr></thead><tbody>
+        {{range .ServedRows}}<tr><td class="text{{if .Sub}} sub{{end}}">{{.Label}}</td><td class="num">{{.Count}}</td><td class="num">{{.Size}}</td></tr>{{end}}
+      </tbody></table></div>
+      {{else}}<div class="hint">Nothing served in this period.</div>{{end}}
+    </div>
+  </div>
+  <div class="chart-caption">Thumbnail cache</div>
+  {{if .CacheErr}}<div class="hint">{{.CacheErr}}</div>
+  {{else}}<div class="row"><span class="label">{{.CacheDir}}</span><span>{{.CacheUsed}} of {{.CacheMax}}</span></div>
+  <div class="bar bar-wide"><span class="bar-fill" style="{{.CacheBarStyle}}"></span></div>{{end}}
+  {{if .Refusals}}
+  <div class="chart-caption">Refused</div>
+  <div class="table-wrap"><table class="stats"><thead><tr><th>Reason</th><th class="num">Requests</th></tr></thead><tbody>
+    {{range .Refusals}}<tr><td class="text">{{.Label}}</td><td class="num">{{.Count}}</td></tr>{{end}}
+  </tbody></table></div>
+  {{end}}
+  <div class="hint">Programs on this PC calling gpsync's API with a token (see Settings &rsaquo; API tokens). Counts what kind of thing was served, never which files. Kept for {{.KeepDays}} days; <code>gpsync stats --api</code> shows the same.</div>
+</div>
+{{end}}
 
 <div class="card">
   <h2>Throttle recovery</h2>
