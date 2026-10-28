@@ -241,6 +241,58 @@ function fail(msg) { console.error(msg); process.exit(1); }
     fail('NEVER_UPLOADED_WRONG: with no last_upload_at the cell must read as a dash, got: ' + elements['status-lastupload'].innerHTML);
   }
 
+  // "Recent activity grows forever" (and Uploading with it): on a page
+  // taller than the window, the list's height is just its content, so
+  // measuring the list against ITSELF found room for one more row every
+  // poll -- rows pitched 24.8px read as 24 through whole-pixel offsetTop,
+  // and the list's padding counted as room. It grew until it alone was a
+  // screen tall. A small layout model: the rest of the page is a fixed
+  // height, the list is its content or whatever the window leaves it,
+  // never less than the live area's min-height, and the page is never
+  // shorter than the window. Polling must settle -- filling the window
+  // exactly when there is room, at the minimum when there isn't.
+  function settle(fixed, vh) {
+    const pitch = 24.8, rowH = 20, pad = 13, overhead = 67, liveMin = 224;
+    let n = 13;
+    const height = (k) => Math.max(k * pitch + (pitch - rowH) + pad, vh - fixed - overhead, liveMin - overhead);
+    const page = (k) => Math.max(vh, fixed + overhead + height(k));
+    const rows = [];
+    for (let i = 0; i < 400; i++) {
+      const top = i * pitch;
+      rows.push({ offsetTop: Math.floor(top), offsetHeight: rowH, getBoundingClientRect: () => ({ top: top, height: rowH }) });
+    }
+    const live = {};
+    const list = {
+      get clientHeight() { return height(n); },
+      querySelectorAll: () => rows,
+      querySelector: () => rows[0],
+      closest: () => live,
+      parentElement: { get offsetHeight() { return height(n) + overhead; } },
+    };
+    const saved = [global.document.querySelector, global.document.scrollingElement, global.getComputedStyle, global.window.innerHeight];
+    global.document.querySelector = (sel) => (sel && sel.indexOf('.live-list') !== -1 ? list : null);
+    global.document.scrollingElement = { get scrollHeight() { return page(n); } };
+    global.getComputedStyle = (el) => (el === live ? { minHeight: liveMin + 'px' } : { marginTop: '4.8px', marginBottom: '4.8px', maxHeight: 'none' });
+    global.window.innerHeight = vh;
+    const seen = [];
+    for (let poll = 0; poll < 30; poll++) { n = measureRecentCapacity(); seen.push(n); }
+    [global.document.querySelector, global.document.scrollingElement, global.getComputedStyle, global.window.innerHeight] = saved;
+    return { n, page: page(n), seen };
+  }
+  const roomy = settle(659, 1000);
+  if (roomy.seen.slice(-5).some((v) => v !== roomy.n) || roomy.page > 1000) {
+    fail('LIVE_LIST_GROWS: with room on the page the list must settle with the page filling the window; rows per poll: ' + roomy.seen.join(',') + ', page ' + roomy.page + 'px in a 1000px window');
+  }
+  // 274px of list, 13px of it padding, rows on a 24.8px pitch: 10 rows
+  // fit (10 * 24.8 + 4.8 + 13 = 265.8px) and an 11th would overflow.
+  if (roomy.n !== 10) {
+    fail('LIVE_LIST_SHORT: with ' + (1000 - 659 - 67) + 'px for the list, 10 rows fit; got ' + roomy.n);
+  }
+  const cramped = settle(1200, 900);
+  if (cramped.seen.slice(-5).some((v) => v !== cramped.n) || cramped.n !== 6) {
+    fail('LIVE_LIST_CRAMPED: with no room left the list must sit at the live area\'s minimum (6 rows) and stay there; rows per poll: ' + cramped.seen.join(','));
+  }
+
   console.log('ALL_SCENARIOS_OK');
   process.exit(0);
 })();

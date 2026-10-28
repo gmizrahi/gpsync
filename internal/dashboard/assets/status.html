@@ -133,10 +133,15 @@ function measureListCapacity(selector, fallback) {
   if (!listEl) return fallback;
   const rows = listEl.querySelectorAll('.file-row');
   if (!rows.length) return fallback;
-  const rowH = rows[0].offsetHeight;
+  // Sub-pixel geometry where the browser has it: offsetTop and
+  // offsetHeight round to whole pixels, so a 24.8px pitch read as 24, and
+  // every measurement claimed a little more room than there was.
+  const box = (el) => (el.getBoundingClientRect ? el.getBoundingClientRect() : { top: el.offsetTop, height: el.offsetHeight });
+  const first = box(rows[0]);
+  const rowH = first.height;
   let pitch = 0;
   if (rows.length >= 2) {
-    pitch = rows[1].offsetTop - rows[0].offsetTop;
+    pitch = box(rows[1]).top - first.top;
   }
   // A stacked row's pitch can never be smaller than the row's own height.
   // Anything smaller means rows[0] and rows[1] aren't vertically adjacent
@@ -158,8 +163,32 @@ function measureListCapacity(selector, fallback) {
   // Recent activity at 54px holding 2 rows, capacity 1). When a ceiling
   // is set, that ceiling is the real space to fill. Desktop sets none, so
   // it takes exactly the path it always did.
+  //
+  // On desktop the space to fill is what's LEFT of the window, not the
+  // list's own height. Reading only the list's own height was a feedback
+  // loop: once the page was taller than the window, that height was just
+  // the last render plus a few pixels of padding and rounding, so each
+  // poll found room for another row and Uploading and Recent activity grew
+  // without end. The list's height plus whatever is left of the window
+  // below the page (negative when the page overflows) shrinks it back as
+  // readily as it grows it, and settles where the page fills the window.
+  // It never goes below what the live area's own min-height leaves the
+  // list, so a small window still shows a few rows and scrolls the page.
   const ceiling = parseFloat(getComputedStyle(listEl).maxHeight);
-  const available = ceiling > 0 ? ceiling : listEl.clientHeight;
+  let available = listEl.clientHeight;
+  if (ceiling > 0) {
+    available = ceiling;
+  } else {
+    const page = document.scrollingElement ? document.scrollingElement.scrollHeight : 0;
+    const vh = (typeof window !== 'undefined' && window.innerHeight) || 0;
+    if (page > 0 && vh > 0) {
+      const live = listEl.closest ? listEl.closest('.status-live') : null;
+      const card = listEl.parentElement;
+      const liveMin = live ? parseFloat(getComputedStyle(live).minHeight) || 0 : 0;
+      const overhead = card ? card.offsetHeight - listEl.clientHeight : 0;
+      available = Math.max(liveMin - overhead, listEl.clientHeight + (vh - page));
+    }
+  }
   if (!(pitch > 0) || !(available > 0)) return fallback;
   // N rows occupy N*pitch plus one trailing margin (the last row's own,
   // with no sibling after it to collapse into), so subtract that before

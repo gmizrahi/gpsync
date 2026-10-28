@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Recent activity and Uploading no longer grow on every refresh.** On a
+  large enough window with more recent events than fit, the Status page
+  added rows on each poll until the list alone was a screen tall and the
+  page scrolled. The lists now fill what's left of the window and stay
+  there; on a window too short for that they keep a few rows and the page
+  scrolls. (#82)
+
 ## [0.7.0]
 
 Statistics now shows how the local API is used: requests by program, what
