@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1]
+
+A fix for the Status page, whose Recent activity and Uploading lists kept
+growing on every refresh.
+
 ### Fixed
 
 - **Recent activity and Uploading no longer grow on every refresh.** On a
@@ -14,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   added rows on each poll until the list alone was a screen tall and the
   page scrolled. The lists now fill what's left of the window and stay
   there; on a window too short for that they keep a few rows and the page
-  scrolls. (#82)
+  scrolls. (#82, #83)
 
 ## [0.7.0]
 
@@ -437,7 +442,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/gmizrahi/gpsync/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/gmizrahi/gpsync/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gmizrahi/gpsync/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gmizrahi/gpsync/compare/v0.4.1...v0.5.0
