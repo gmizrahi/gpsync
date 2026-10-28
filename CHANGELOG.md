@@ -15,7 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   originals) with sizes, refusals by reason, and how full the thumbnail
   cache is, over 7, 30 or 90 days. `gpsync stats --api` prints the same. It
   counts what kind of thing was served, never which files, and keeps 90
-  days. (#76)
+  days. (#76, #79)
+
+### Changed
+
+- **The dashboard's colours are defined once per theme token**, with CSS
+  `light-dark()`, instead of in up to four places. It looks the same in
+  every theme. Native controls and scrollbars now follow the chosen theme
+  too. It needs a browser from mid-2024 or later (Chrome/Edge 123, Firefox
+  120, Safari 17.5); the tray's own window keeps itself current. (#77)
 
 ## [0.6.0]
 
