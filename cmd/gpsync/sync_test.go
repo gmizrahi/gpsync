@@ -26,7 +26,7 @@ func touch(t *testing.T, path string) {
 // that's exactly the same cache-hit check ScanFolders itself uses to skip
 // re-hashing unchanged files.
 func TestEstimateBatchTotals_CountsFilesAndFlagsAlreadySyncedFromCache(t *testing.T) {
-	t.Setenv("GPSYNC_STATE_DIR", t.TempDir())
+	isolateState(t)
 	db, err := statedb.Open()
 	if err != nil {
 		t.Fatal(err)
