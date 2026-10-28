@@ -195,7 +195,7 @@ func TestThumbCache(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := c.Thumbnail(testSHA(1), a, 256); err != nil {
+			if _, _, err := c.Thumbnail(testSHA(1), a, 256); err != nil {
 				errs <- err
 			}
 		}()
@@ -208,13 +208,13 @@ func TestThumbCache(t *testing.T) {
 	if err := os.Remove(a); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := c.Thumbnail(testSHA(1), a, 256); err != nil || len(data) == 0 {
-		t.Errorf("cached thumbnail with the original gone: %d bytes, %v", len(data), err)
+	if data, fromCache, err := c.Thumbnail(testSHA(1), a, 256); err != nil || len(data) == 0 || !fromCache {
+		t.Errorf("cached thumbnail with the original gone: %d bytes, from cache %v, %v", len(data), fromCache, err)
 	}
-	if _, err := c.Thumbnail(testSHA(2), filepath.Join(src, "v.mp4"), 256); !errors.Is(err, ErrNoThumbnail) {
+	if _, _, err := c.Thumbnail(testSHA(2), filepath.Join(src, "v.mp4"), 256); !errors.Is(err, ErrNoThumbnail) {
 		t.Errorf("video: err %v, want ErrNoThumbnail", err)
 	}
-	if _, err := c.Thumbnail(testSHA(3), filepath.Join(src, "absent.jpg"), 256); !errors.Is(err, ErrMediaUnavailable) {
+	if _, _, err := c.Thumbnail(testSHA(3), filepath.Join(src, "absent.jpg"), 256); !errors.Is(err, ErrMediaUnavailable) {
 		t.Errorf("unreadable original: err %v, want ErrMediaUnavailable", err)
 	}
 
@@ -225,7 +225,7 @@ func TestThumbCache(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		p := filepath.Join(src, fmt.Sprintf("%d.jpg", i))
 		writeTestJPEG(t, p, 600, 400)
-		if _, err := small.Thumbnail(testSHA(i), p, 256); err != nil {
+		if _, _, err := small.Thumbnail(testSHA(i), p, 256); err != nil {
 			t.Fatal(err)
 		}
 		// Distinct, increasing recency, so "least recently used" is exact.

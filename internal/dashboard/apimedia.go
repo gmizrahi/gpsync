@@ -154,7 +154,7 @@ func handleMediaThumb(w http.ResponseWriter, r *http.Request, db *statedb.DB, th
 	if !ok {
 		return
 	}
-	data, err := thumbs.Thumbnail(sha, path, size)
+	data, fromCache, err := thumbs.Thumbnail(sha, path, size)
 	switch {
 	case errors.Is(err, engine.ErrNoThumbnail):
 		http.Error(w, "this format has no thumbnail", http.StatusUnsupportedMediaType)
@@ -163,6 +163,7 @@ func handleMediaThumb(w http.ResponseWriter, r *http.Request, db *statedb.DB, th
 		http.Error(w, "the original is not available", http.StatusNotFound)
 		return
 	}
+	noteThumbSource(w, fromCache)
 	cacheForever(w, `"`+sha+"-"+strconv.Itoa(size)+`"`)
 	w.Header().Set("Content-Type", "image/jpeg")
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))

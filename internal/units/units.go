@@ -1,8 +1,11 @@
-// Package units formats byte counts for people, once, for both the CLI and
-// the tray dashboard.
+// Package units formats byte counts and times for people, once, for both the
+// CLI and the tray dashboard.
 package units
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Bytes renders n with 1024-based magnitudes and KB / MB / GB / TB labels,
 // e.g. "3.0KB", "286.2GB".
@@ -29,4 +32,34 @@ func Bytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f%cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// Relative renders t against now: "just now", "5 minutes ago", "2 hours
+// ago", "3 days ago", or the same with "in" for a time ahead. Hours run to
+// 48 so "yesterday evening" doesn't read as "1 day ago".
+func Relative(t, now time.Time) string {
+	d := now.Sub(t)
+	future := d < 0
+	if future {
+		d = -d
+	}
+	var n int
+	var unit string
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		n, unit = int(d/time.Minute), "minute"
+	case d < 48*time.Hour:
+		n, unit = int(d/time.Hour), "hour"
+	default:
+		n, unit = int(d/(24*time.Hour)), "day"
+	}
+	if n != 1 {
+		unit += "s"
+	}
+	if future {
+		return fmt.Sprintf("in %d %s", n, unit)
+	}
+	return fmt.Sprintf("%d %s ago", n, unit)
 }

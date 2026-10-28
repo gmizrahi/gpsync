@@ -88,11 +88,11 @@ var thumbFileName = regexp.MustCompile(`^[0-9a-f]{64}\.jpg$`)
 
 // Thumbnail returns the JPEG thumbnail of the file at path, whose content
 // hash is sha, at a size from ThumbSizes: from the cache, or generated and
-// cached. ErrNoThumbnail if the format has none; ErrMediaUnavailable if the
-// file can't be decoded.
-func (c *ThumbCache) Thumbnail(sha, path string, size int) ([]byte, error) {
+// cached; fromCache says which. ErrNoThumbnail if the format has none;
+// ErrMediaUnavailable if the file can't be decoded.
+func (c *ThumbCache) Thumbnail(sha, path string, size int) (data []byte, fromCache bool, err error) {
 	if !preprocess.IsResizable(path) {
-		return nil, ErrNoThumbnail
+		return nil, false, ErrNoThumbnail
 	}
 	c.mu.Lock()
 	dir := c.dir
@@ -103,7 +103,7 @@ func (c *ThumbCache) Thumbnail(sha, path string, size int) ([]byte, error) {
 			// The modification time is the recency eviction goes by.
 			now := time.Now()
 			_ = os.Chtimes(file, now, now)
-			return data, nil
+			return data, true, nil
 		}
 		// One generation per entry at a time: two requests for the same
 		// thumbnail would otherwise stage the same file at once.
@@ -129,7 +129,7 @@ func (c *ThumbCache) Thumbnail(sha, path string, size int) ([]byte, error) {
 	data, _, ok := GenerateThumbnail(path, size)
 	<-c.gen
 	if !ok {
-		return nil, ErrMediaUnavailable
+		return nil, false, ErrMediaUnavailable
 	}
 	// A cache that can't be written still serves the thumbnail it made.
 	if err := ensureThumbDir(dir, filepath.Dir(file)); err == nil {
@@ -137,7 +137,7 @@ func (c *ThumbCache) Thumbnail(sha, path string, size int) ([]byte, error) {
 			c.added(dir, int64(len(data)))
 		}
 	}
-	return data, nil
+	return data, false, nil
 }
 
 // ensureThumbDir creates the cache folder and the size folder under it. A
@@ -197,12 +197,14 @@ type thumbEntry struct {
 	used time.Time
 }
 
-// entries lists the cache's own files: <size>/<sha256>.jpg for the sizes it
-// makes, and nothing else in the folder.
-func (c *ThumbCache) entries() []thumbEntry {
+func (c *ThumbCache) entries() []thumbEntry { return thumbEntries(c.dir) }
+
+// thumbEntries lists a cache folder's own files: <size>/<sha256>.jpg for
+// the sizes it makes, and nothing else in the folder.
+func thumbEntries(dir string) []thumbEntry {
 	var out []thumbEntry
 	for _, size := range ThumbSizes {
-		sub := filepath.Join(c.dir, strconv.Itoa(size))
+		sub := filepath.Join(dir, strconv.Itoa(size))
 		list, err := os.ReadDir(sub)
 		if err != nil {
 			continue
