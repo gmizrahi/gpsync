@@ -1,26 +1,16 @@
 
+  /* Each theme token once: light-dark(light, dark). color-scheme picks
+     which half applies -- the system's choice by default, or Settings'
+     explicit Light/Dark through data-theme -- and gives native controls
+     and scrollbars the same theme (#77). */
   :root {
-    --bg: #0f1115; --bg-card: #171a21; --border: #262b36;
-    --text: #e8eaed; --text-dim: #8b93a3; --bg-input: #0c0e12; --track: #2a2f3a;
-    --ok: #4caf50; --warn: #ffb300; --err: #ef5350; --info: #4a9eff;
+    color-scheme: light dark;
+    --bg: light-dark(#f6f7f9, #0f1115); --bg-card: light-dark(#ffffff, #171a21); --border: light-dark(#e1e4ea, #262b36);
+    --text: light-dark(#1b1e24, #e8eaed); --text-dim: light-dark(#5b6472, #8b93a3); --bg-input: light-dark(#ffffff, #0c0e12); --track: light-dark(#e1e4ea, #2a2f3a);
+    --ok: light-dark(#2e7d32, #4caf50); --warn: light-dark(#a15c00, #ffb300); --err: light-dark(#c62828, #ef5350); --info: light-dark(#1a63c9, #4a9eff);
   }
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) {
-      --bg: #f6f7f9; --bg-card: #ffffff; --border: #e1e4ea;
-      --text: #1b1e24; --text-dim: #5b6472; --bg-input: #ffffff; --track: #e1e4ea;
-      --ok: #2e7d32; --warn: #a15c00; --err: #c62828; --info: #1a63c9;
-    }
-  }
-  :root[data-theme="light"] {
-    --bg: #f6f7f9; --bg-card: #ffffff; --border: #e1e4ea;
-    --text: #1b1e24; --text-dim: #5b6472; --bg-input: #ffffff; --track: #e1e4ea;
-    --ok: #2e7d32; --warn: #a15c00; --err: #c62828; --info: #1a63c9;
-  }
-  :root[data-theme="dark"] {
-    --bg: #0f1115; --bg-card: #171a21; --border: #262b36;
-    --text: #e8eaed; --text-dim: #8b93a3; --bg-input: #0c0e12; --track: #2a2f3a;
-    --ok: #4caf50; --warn: #ffb300; --err: #ef5350; --info: #4a9eff;
-  }
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
   a { color: var(--info); text-decoration: none; }

@@ -15,15 +15,12 @@ import (
 // framework, no build step -- consistent with every other dependency
 // choice in this project.
 //
-// Dark is the base :root palette (this app shipped dark-only first, and
-// it's the one already confirmed working on real Windows) -- light is an
-// override, applied either by @media (prefers-color-scheme: light) when
-// Theme is "system" (config.ThemeSystem, the default: no data-theme
-// attribute at all, see pageShell) or unconditionally by
-// :root[data-theme="light"] when the user picks Light explicitly in
-// Settings. :root[data-theme="dark"] is listed too even though it matches
-// the base already, so an explicit Dark choice is never silently dependent
-// on nothing else having overridden it.
+// Each theme token is defined once, as light-dark(light, dark) (#77), and
+// color-scheme decides which half applies: "light dark" by default, so the
+// system's preference does, and just one of them when the user picks Light
+// or Dark in Settings, which pageShell stamps as data-theme. It needs
+// Chrome/Edge 123, Firefox 120 or Safari 17.5; WebView2, which the tray
+// uses, keeps itself current.
 //
 //go:embed assets/dashboard.css
 var sharedCSS string
@@ -32,9 +29,9 @@ var sharedCSS string
 // bar with the app name and a three-item nav, shared CSS. active picks
 // which nav link gets the "current page" style. theme is a config.Theme*
 // value -- config.ThemeSystem (or anything unrecognized) stamps no
-// data-theme attribute at all, letting sharedCSS's prefers-color-scheme
-// media query decide; Light/Dark stamp the attribute explicitly, which
-// always wins over the media query (see sharedCSS's own doc comment).
+// data-theme attribute at all, so the system's colour scheme decides;
+// Light/Dark stamp the attribute, which pins color-scheme to that one (see
+// sharedCSS's own doc comment).
 //
 // db is used ONLY to decide whether the Duplicates/Originals nav links
 // show at all: a tab that leads to an empty page is noise, so each is
