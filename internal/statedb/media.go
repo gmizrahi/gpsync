@@ -3,6 +3,8 @@ package statedb
 import (
 	"database/sql"
 	"errors"
+	"sort"
+	"strings"
 )
 
 // MediaRow is one uploads row as the media API (issue #66) lists it.
@@ -145,4 +147,46 @@ func (db *DB) SHA256sWithoutMetadata() (map[string]bool, error) {
 		out[s] = true
 	}
 	return out, rows.Err()
+}
+
+// filesSeenPathsQuery is PathsBySHA256's statement for n hashes: one
+// IN (...) lookup, which idx_files_seen_sha256 serves -- not a scan of
+// files_seen per item.
+func filesSeenPathsQuery(n int) string {
+	return `SELECT sha256, path FROM files_seen WHERE sha256 IN (?` + strings.Repeat(",?", n-1) + `)`
+}
+
+// PathsBySHA256 returns, for each given hash, every scanned path that held
+// that content when last scanned, sorted, in one query. A hash with no such
+// path is absent from the map.
+func (db *DB) PathsBySHA256(sha256s []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if len(sha256s) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(sha256s))
+	for i, s := range sha256s {
+		args[i] = s
+	}
+	rows, err := db.conn.Query(filesSeenPathsQuery(len(sha256s)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sha, path string
+		if err := rows.Scan(&sha, &path); err != nil {
+			return nil, err
+		}
+		out[sha] = append(out[sha], path)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Byte order, the same on every OS. files_seen.path collates NOCASE, so
+	// the database's own ORDER BY would depend on that.
+	for _, ps := range out {
+		sort.Strings(ps)
+	}
+	return out, nil
 }

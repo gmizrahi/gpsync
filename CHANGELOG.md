@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The media API lists each item's file paths:** `first_path`, where
+  gpsync first saw the content, and `paths`, every path that holds it now.
+  A program can then apply its own rules about folders and names, such as
+  leaving out a messaging app's received media. The paths are exactly as
+  stored and, like everything else under `/api/v1`, only reach a caller
+  with a valid token. (#85)
+
 ## [0.7.1]
 
 A fix for the Status page, whose Recent activity and Uploading lists kept
