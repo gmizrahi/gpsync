@@ -2,8 +2,10 @@ package statedb
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +73,48 @@ func TestMediaMetadata_OldLedgerMigratesAndRecordsOnce(t *testing.T) {
 	}
 	if m, _ := db.GetListableMedia("new"); m.CapturedAt != 99 || m.CaptureSource.Valid || m.CaptureOffset.Valid || m.Lat.Valid || m.Width.Valid {
 		t.Errorf("empty metadata: %+v; want captured_at kept and the rest NULL", m)
+	}
+}
+
+// #85: one lookup per page, grouped by hash and sorted; a hash with no path
+// is absent; and the lookup is served by idx_files_seen_sha256, so a page
+// of 1000 items costs one indexed query, not a scan of files_seen.
+func TestPathsBySHA256(t *testing.T) {
+	db := openTestDB(t)
+	for _, f := range []struct{ path, sha string }{
+		// "a" and "B": byte order puts B first, the column's NOCASE order a.
+		{`C:\Photos\a.jpg`, "h1"}, {`C:\Photos\B.jpg`, "h1"}, {"/home/u/c.jpg", "h2"}, {"/x/other.jpg", "h3"},
+	} {
+		must(t, db.UpsertFileSeen(f.path, f.sha, 1, 1))
+	}
+	got, err := db.PathsBySHA256([]string{"h1", "h2", "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || strings.Join(got["h1"], "|") != `C:\Photos\B.jpg|C:\Photos\a.jpg` || strings.Join(got["h2"], "|") != "/home/u/c.jpg" {
+		t.Errorf("PathsBySHA256 = %v", got)
+	}
+
+	args := make([]any, 500)
+	for i := range args {
+		args[i] = fmt.Sprintf("%064x", i)
+	}
+	rows, err := db.conn.Query("EXPLAIN QUERY PLAN "+filesSeenPathsQuery(len(args)), args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	p := strings.Join(plan, " / ")
+	if !strings.Contains(p, "idx_files_seen_sha256") || strings.Contains(p, "SCAN files_seen") {
+		t.Errorf("the paths lookup isn't served by idx_files_seen_sha256: %s", p)
 	}
 }

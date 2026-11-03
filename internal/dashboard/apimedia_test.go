@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -109,7 +110,9 @@ func TestAPIv1Media_List(t *testing.T) {
 		t.Fatalf("first page = %s (%v); want one item and a next cursor", body, err)
 	}
 	want := map[string]any{"sha256": f.photo, "captured_at": time.Date(2024, 5, 1, 9, 0, 0, 0, time.Local).Format(time.RFC3339),
-		"kind": "photo", "mime_type": "", "has_thumb": true}
+		"kind": "photo", "mime_type": "", "has_thumb": true,
+		// #85: the paths, as stored. Every other field is as before.
+		"first_path": f.photoPath, "paths": []any{f.photoPath}}
 	if !reflect.DeepEqual(page.Items[0], want) {
 		t.Errorf("item = %v\nwant   %v", page.Items[0], want)
 	}
@@ -299,6 +302,126 @@ func TestAPIv1Media_MetadataFields(t *testing.T) {
 	for _, k := range []string{"captured_from", "offset", "lat", "lon", "width", "height"} {
 		if _, ok := byHash[f.video][k]; ok {
 			t.Errorf("video has %q, which nothing recorded", k)
+		}
+	}
+}
+
+// #85: each item's paths, exactly as stored and behind the token like
+// everything else -- a file seen at two paths lists both, sorted; a first
+// path that's gone stays as first_path but leaves paths; Windows and Unix
+// paths come back untouched; an item with no known path has neither field.
+func TestAPIv1Media_Paths(t *testing.T) {
+	db := openTestDB(t)
+	at := float64(time.Date(2024, 5, 1, 9, 0, 0, 0, time.UTC).Unix())
+	sha := func(i int) string { return fmt.Sprintf("%064x", i) }
+	seed := func(s, first string, paths ...string) {
+		t.Helper()
+		if err := db.EnsurePending(s, 1, "image/jpeg", first, &at); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range paths {
+			if err := db.UpsertFileSeen(p, s, 1, 1); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	seed(sha(1), `D:\Pictures\2024_05 Trip\IMG_1.jpg`, `D:\Pictures\2024_05 Trip\IMG_1.jpg`, `D:\Pictures\Backup\IMG_1.jpg`)
+	seed(sha(2), `C:\Users\me\Downloads\IMG-20240501-WA0003.jpg`, `D:\Pictures\Received\IMG-20240501-WA0003.jpg`) // first path gone
+	seed(sha(3), "/home/me/Pictures/b.jpg", "/home/me/Pictures/b.jpg")
+	seed(sha(4), "") // no known path
+	srv := newTestServer(t, db, newFakeController(), Options{})
+	c := newTestClient(t)
+
+	if resp, body := apiGet(t, c, srv.URL+"/api/v1/media", ""); resp.StatusCode != http.StatusUnauthorized || strings.Contains(string(body), "Pictures") {
+		t.Fatalf("without a token: %d %s; want 401 and no paths", resp.StatusCode, body)
+	}
+	tok := newToken(t, db, "viewer")
+	_, body := apiGet(t, c, srv.URL+"/api/v1/media", tok)
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]map[string]any{}
+	for _, it := range page.Items {
+		by[it["sha256"].(string)] = it
+	}
+	paths := func(it map[string]any) string {
+		var out []string
+		ps, _ := it["paths"].([]any)
+		for _, p := range ps {
+			out = append(out, p.(string))
+		}
+		return strings.Join(out, " | ")
+	}
+	for s, want := range map[string][2]string{
+		sha(1): {`D:\Pictures\2024_05 Trip\IMG_1.jpg`, `D:\Pictures\2024_05 Trip\IMG_1.jpg | D:\Pictures\Backup\IMG_1.jpg`},
+		sha(2): {`C:\Users\me\Downloads\IMG-20240501-WA0003.jpg`, `D:\Pictures\Received\IMG-20240501-WA0003.jpg`},
+		sha(3): {"/home/me/Pictures/b.jpg", "/home/me/Pictures/b.jpg"},
+	} {
+		if it := by[s]; it["first_path"] != want[0] || paths(it) != want[1] {
+			t.Errorf("%s…: first_path %v, paths %q; want %q, %q", s[60:], it["first_path"], paths(it), want[0], want[1])
+		}
+	}
+	if _, has := by[sha(4)]["first_path"]; has {
+		t.Errorf("an item with no known path has first_path: %v", by[sha(4)])
+	}
+	if _, has := by[sha(4)]["paths"]; has {
+		t.Errorf("an item with no known path has paths: %v", by[sha(4)])
+	}
+}
+
+// A full page of 1000 items, each at two paths, comes back in one request
+// with every path right -- the paths come from one indexed lookup per page
+// (see TestPathsBySHA256), not one per item.
+func TestAPIv1Media_PathsOnAFullPage(t *testing.T) {
+	db := openTestDB(t)
+	at := float64(time.Date(2024, 5, 1, 9, 0, 0, 0, time.UTC).Unix())
+	// Seeded in one transaction: 3000 separate writes made this test take
+	// seconds of setup for a request that takes milliseconds.
+	raw, err := sql.Open("sqlite", statedb.StateDBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := raw.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < engine.MediaListMaxLimit; i++ {
+		s := fmt.Sprintf("%064x", i)
+		a, b := fmt.Sprintf(`D:\P\a%04d.jpg`, i), fmt.Sprintf(`D:\P\b%04d.jpg`, i)
+		if _, err := tx.Exec(`INSERT INTO uploads (sha256, size, mime_type, status, first_source_path, captured_at) VALUES (?, 1, 'image/jpeg', 'pending', ?, ?)`, s, a, at); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []string{b, a} {
+			if _, err := tx.Exec(`INSERT INTO files_seen (path, sha256, mtime, size, last_scanned) VALUES (?, ?, 1, 1, 1)`, p, s); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	srv := newTestServer(t, db, newFakeController(), Options{})
+	start := time.Now()
+	_, body := apiGet(t, newTestClient(t), srv.URL+"/api/v1/media?limit=1000", newToken(t, db, "viewer"))
+	t.Logf("a 1000-item page took %v", time.Since(start).Round(time.Millisecond))
+	var page struct {
+		Items []struct {
+			SHA256 string   `json:"sha256"`
+			Paths  []string `json:"paths"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil || len(page.Items) != 1000 {
+		t.Fatalf("%d items (%v)", len(page.Items), err)
+	}
+	for _, it := range page.Items {
+		var i int
+		fmt.Sscanf(it.SHA256, "%x", &i)
+		if want := fmt.Sprintf(`D:\P\a%04d.jpg|D:\P\b%04d.jpg`, i, i); strings.Join(it.Paths, "|") != want {
+			t.Fatalf("item %d: paths %v, want %s", i, it.Paths, want)
 		}
 	}
 }

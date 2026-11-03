@@ -57,6 +57,12 @@ type MediaItem struct {
 	HasThumb      bool
 	Lat, Lon      *float64
 	Width, Height *int
+	// FirstPath is where gpsync first saw the content, as stored; Paths is
+	// every scanned path that holds it now, sorted. Both are the library's
+	// own folder layout: the API serves them to authenticated callers only,
+	// as it does everything else.
+	FirstPath string
+	Paths     []string
 }
 
 // MediaQuery is a list request: files captured in [From, To), zero meaning
@@ -100,6 +106,14 @@ func ListMedia(db *statedb.DB, q MediaQuery) (items []MediaItem, next string, er
 		last := rows[len(rows)-1]
 		next = encodeMediaCursor(last.CapturedAt, last.SHA256)
 	}
+	shas := make([]string, len(rows))
+	for i, r := range rows {
+		shas[i] = r.SHA256
+	}
+	paths, err := db.PathsBySHA256(shas) // one lookup for the page
+	if err != nil {
+		return nil, "", err
+	}
 	items = make([]MediaItem, 0, len(rows))
 	for _, r := range rows {
 		it := MediaItem{
@@ -109,6 +123,8 @@ func ListMedia(db *statedb.DB, q MediaQuery) (items []MediaItem, next string, er
 			Kind:         mediaKind(r),
 			MimeType:     r.MimeType,
 			HasThumb:     preprocess.IsResizable(r.FirstSourcePath),
+			FirstPath:    r.FirstSourcePath,
+			Paths:        paths[r.SHA256],
 		}
 		if zone, ok := offsetZone(r.CaptureOffset.String); ok && it.CapturedFrom == scanner.CaptureFromEXIF {
 			it.CapturedAt, it.Offset = it.CapturedAt.In(zone), r.CaptureOffset.String

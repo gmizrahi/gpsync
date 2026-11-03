@@ -32,6 +32,8 @@ type mediaItemJSON struct {
 	Lon          *float64 `json:"lon,omitempty"`
 	Width        *int     `json:"width,omitempty"`
 	Height       *int     `json:"height,omitempty"`
+	FirstPath    string   `json:"first_path,omitempty"` // as stored, the OS's own separators
+	Paths        []string `json:"paths,omitempty"`      // every scanned path holding it now, sorted
 }
 
 type mediaListJSON struct {
@@ -83,6 +85,8 @@ func handleMediaList(w http.ResponseWriter, r *http.Request, db *statedb.DB) {
 			Lon:          it.Lon,
 			Width:        it.Width,
 			Height:       it.Height,
+			FirstPath:    it.FirstPath,
+			Paths:        it.Paths,
 		})
 	}
 	if next != "" {

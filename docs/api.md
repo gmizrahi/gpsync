@@ -112,7 +112,9 @@ Lists files by capture time, oldest first. Scope: `read`.
     {"sha256": "1c22…f031", "captured_at": "2024-05-01T09:12:44+02:00",
      "captured_from": "exif", "offset": "+02:00",
      "kind": "photo", "mime_type": "image/jpeg", "has_thumb": true,
-     "lat": 48.8584, "lon": 2.2945, "width": 4032, "height": 3024}
+     "lat": 48.8584, "lon": 2.2945, "width": 4032, "height": 3024,
+     "first_path": "D:\\Pictures\\2024_05 Trip\\IMG_1234.jpg",
+     "paths": ["D:\\Pictures\\2024_05 Trip\\IMG_1234.jpg", "E:\\Backup\\IMG_1234.jpg"]}
   ],
   "next": "MTcxNDU0…"
 }
@@ -134,7 +136,19 @@ Lists files by capture time, oldest first. Scope: `read`.
 - `width` and `height` are the image as displayed, with the EXIF rotation
   applied, when gpsync can read them: from the image header for JPEG, PNG,
   GIF and WebP, and from EXIF for TIFF.
+- `first_path` is the full path where gpsync first saw this content, and
+  `paths` is every path that holds it now, as of the last scan, sorted
+  byte by byte. A file that has moved keeps its `first_path`, and `paths`
+  shows where it is now. Both are exactly as stored, with the PC's own
+  separators (a Windows path stays a Windows path); normalising them is up
+  to the caller.
 - Every one of these is absent, not `null`, when it isn't known.
+
+**Full paths are private.** They show how the library is organised (folder
+and file names), so they are served only with a valid token, like
+everything else under `/api/v1`. They never reach an unauthenticated
+caller, and the API answers only on this machine. A program you give a
+token to can read them; treat the token accordingly.
 - `next` is `null` on the last page. Pass it back as `cursor` to get the
   following page; paging neither skips nor repeats a file, even when several
   share a capture time.
