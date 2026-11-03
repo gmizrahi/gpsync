@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0]
+
+The media API now gives each item's file paths, so a program can apply its
+own rules about where a photo lives.
+
 ### Added
 
 - **The media API lists each item's file paths:** `first_path`, where
@@ -14,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A program can then apply its own rules about folders and names, such as
   leaving out a messaging app's received media. The paths are exactly as
   stored and, like everything else under `/api/v1`, only reach a caller
-  with a valid token. (#85)
+  with a valid token. (#85, #86)
 
 ## [0.7.1]
 
@@ -451,7 +456,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/gmizrahi/gpsync/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/gmizrahi/gpsync/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/gmizrahi/gpsync/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gmizrahi/gpsync/compare/v0.5.0...v0.6.0
