@@ -7,13 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1]
+
+Release files now carry build provenance you can check, and the database
+driver is updated. Nothing else changes in how gpsync runs.
+
 ### Added
 
 - **Release files carry build provenance.** Each file on a release (the
   archives, the Windows installer and `checksums.txt`) now has a signed
   attestation that it was built by this repository's release workflow, which
   you can check with `gh attestation verify FILE --repo gmizrahi/gpsync`.
-  `checksums.txt` is unchanged. See the README. (#91)
+  `checksums.txt` is unchanged. See the README. (#91, #94)
+
+### Changed
+
+- **The release and test pipelines pin what they run.** Every GitHub action
+  is referenced by an exact commit, and the vulnerability scanner by an exact
+  version, so neither can change under a release unnoticed. (#89, #90, #93,
+  #92)
+- **Dependencies:** `modernc.org/sqlite` 1.61.1, a patch release that fixes
+  a slowdown in 1.61.0 for statements reused with a lookup in a join. (#88)
 
 ## [0.8.0]
 
@@ -464,7 +478,8 @@ These come from the Google Photos API itself, not from gpsync. See
 - Each user must create their own Google API credentials. See
   [docs/setup.md](docs/setup.md).
 
-[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/gmizrahi/gpsync/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/gmizrahi/gpsync/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/gmizrahi/gpsync/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/gmizrahi/gpsync/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/gmizrahi/gpsync/compare/v0.6.0...v0.7.0
