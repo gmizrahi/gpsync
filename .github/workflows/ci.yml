@@ -177,5 +177,12 @@ jobs:
         with:
           go-version: stable
           check-latest: true
-      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      # Pinned, like golangci-lint above: with @latest the gate could change
+      # behaviour, or stop building, under a pipeline nobody touched. The pin
+      # freezes the tool, not what it knows: it reads the vulnerability
+      # database when it runs, so new advisories are still found. Dependabot
+      # can't see a version inside a `go install` line, so move it by hand;
+      # a govulncheck older than the Go release in use fails with an error
+      # saying so, which is the cue to bump it.
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
       - run: govulncheck ./...
