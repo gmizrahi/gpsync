@@ -90,6 +90,19 @@ background with the bundled systemd unit or launchd agent: see
 [docs/running-as-a-service.md](docs/running-as-a-service.md). The CLI and the
 web dashboard work the same everywhere; only the tray app is Windows-only.
 
+**Checking a download.** `checksums.txt` on each release lists the SHA-256 of
+every file, which shows a download is intact (`sha256sum -c checksums.txt`).
+Releases after 0.8.0 also carry a signed *build provenance attestation* for
+each file: GitHub's record that this exact file was built by this
+repository's release workflow. With the [GitHub CLI](https://cli.github.com/):
+
+```sh
+gh attestation verify gpsync-setup-<version>.exe --repo gmizrahi/gpsync
+```
+
+It fails for a file that was changed after the build, or that didn't come from
+this repository. Earlier releases have only the checksums.
+
 **From source** (any platform for the CLI; the tray app is Windows-only):
 
 ```sh

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Release files carry build provenance.** Each file on a release (the
+  archives, the Windows installer and `checksums.txt`) now has a signed
+  attestation that it was built by this repository's release workflow, which
+  you can check with `gh attestation verify FILE --repo gmizrahi/gpsync`.
+  `checksums.txt` is unchanged. See the README. (#91)
+
 ## [0.8.0]
 
 The media API now gives each item's file paths, so a program can apply its
